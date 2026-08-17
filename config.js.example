@@ -1,0 +1,102 @@
+/**
+ * OwnTracks Frontend Configuration
+ * Copy this file to config.js and fill in your credentials
+ */
+
+window.CONFIG = {
+  api: {
+    url: "https://recorder.example.org"
+    // For unauthenticated APIs, just specify the URL above
+
+    // For basic authentication (both required if using basic auth)
+    // username: "YOUR_USERNAME",
+    // password: "YOUR_PASSWORD",
+
+    // For cookie authentication (both required if using cookie auth)
+    // cookieName: "session_cookie",
+    // cookieValue: "your_cookie_value",
+
+    // timeout: 600000  // 10 minutes in milliseconds (optional)
+  }
+
+  // Optional map settings
+  // map: {
+  //   tileServer: "https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+  //   defaultCenter: [51.50138, -0.14189], // London
+  //   defaultZoom: 13,
+  //   minZoom: 2,
+  //   maxZoom: 19
+  // },
+
+  // Optional defaults for data source selection
+  // defaults: {
+  //   user: "",
+  //   device: "",
+  //   timePeriod: "30days"
+  // },
+
+  // Optional storage settings
+  // storage: {
+  //   key: "owntracks_cache"  // localStorage key prefix for caching
+  // },
+
+  // Optional display defaults (all can also be configured in the sidebar UI)
+  // display: {
+  //   points: {
+  //     show: true,
+  //     color: "#3388ff",
+  //     size: 2,
+  //     opacity: 0.5
+  //   },
+  //   lines: {
+  //     show: true,
+  //     color: "#3388ff",
+  //     width: 3,
+  //     opacity: 0.7,
+  //     smooth: false
+  //   },
+  //   accuracy: {
+  //     maxMeters: 0  // 0 = show all points
+  //   },
+  //   altitude: {
+  //     min: 0,
+  //     max: 1000,
+  //     points: {
+  //       enabled: false,
+  //       lowColor: "#00ff00",
+  //       highColor: "#ff0000"
+  //     },
+  //     lines: {
+  //       enabled: false,
+  //       lowColor: "#00ff00",
+  //       highColor: "#ff0000"
+  //     }
+  //   },
+  //   heatmap: {
+  //     enabled: false,
+  //     radius: 25,
+  //     blur: 15,
+  //     minOpacity: 0.05,
+  //     gradient: {
+  //       lowColor: "#0000ff",
+  //       midColor: "#00ffff",
+  //       highColor: "#ff0000"
+  //     },
+  //     // maxZoom: 18
+  //   },
+  //   storageEnabled: true  // Cache location data in browser
+  // },
+
+  // Optional performance settings
+  // performance: {
+  //   dynamicPointVisibility: true  // Enable automatic point density adjustment (default: true)
+  // },
+
+  // Optional debug settings
+  // debug: {
+  //   consoleLogging: true  // Enable console.log output (default: true)
+  // },
+
+  // Display customizations are handled in the UI and persist to localStorage automatically
+  // All display options have defaults built into the application
+};
