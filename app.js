@@ -376,6 +376,17 @@
   // ============================================================================
 
   function initUI() {
+    // Date input confirmation helper
+    const confirmDateInput = (input) => {
+      // Remove the class first to allow re-triggering the animation
+      input.classList.remove('date-confirmed');
+      // Trigger reflow to restart the animation
+      void input.offsetWidth;
+      input.classList.add('date-confirmed');
+      // Remove the class after animation completes
+      setTimeout(() => input.classList.remove('date-confirmed'), 600);
+    };
+
     // Sidebar toggle
     document.getElementById('sidebarToggle').addEventListener('click', toggleSidebar);
 
@@ -387,6 +398,207 @@
       saveSetting('timePeriod', value, '30days');
       handleTimePeriodChange();
     });
+    // Custom date picker functionality
+    const customDatePicker = document.getElementById('customDatePicker');
+    let currentPickerInput = null;
+    let pickerCurrentDate = new Date();
+
+    // Open date picker when input is clicked
+    document.querySelectorAll('.date-input-wrapper input').forEach(input => {
+      input.addEventListener('click', (e) => {
+        currentPickerInput = e.target;
+        const currentValue = e.target.dataset.value || '';
+
+        // Parse current value or use now
+        if (currentValue) {
+          // Handle both 'T' and ' ' separators
+          const separator = currentValue.includes('T') ? 'T' : ' ';
+          const [datePart, timePart] = currentValue.split(separator);
+          const parts = datePart.split('-').map(Number);
+          const year = parts[0];
+          const month = parts[1];
+          const day = parts[2];
+          const timeParts = timePart ? timePart.split(':').map(Number) : [0, 0];
+          const hour = timeParts[0];
+          const minute = timeParts[1];
+
+          // Validate we have valid numbers
+          if (!isNaN(year) && !isNaN(month) && !isNaN(day)) {
+            pickerCurrentDate = new Date(year, month - 1, day, hour || 0, minute || 0);
+          } else {
+            pickerCurrentDate = new Date();
+            pickerCurrentDate.setMinutes(0, 0, 0);
+          }
+        } else {
+          pickerCurrentDate = new Date();
+          pickerCurrentDate.setMinutes(0, 0, 0);
+        }
+
+        renderDatePicker(pickerCurrentDate);
+
+        // Position and show picker - position it below the clicked input
+        const inputRect = e.target.getBoundingClientRect();
+        customDatePicker.style.left = inputRect.left + 'px';
+        customDatePicker.style.top = (inputRect.bottom + 5) + 'px';
+        customDatePicker.style.display = 'block';
+      });
+    });
+
+    // Close picker when clicking outside
+    document.addEventListener('click', (e) => {
+      if (customDatePicker.style.display !== 'none' &&
+          !customDatePicker.contains(e.target) &&
+          !e.target.closest('.date-input-wrapper')) {
+        customDatePicker.style.display = 'none';
+      }
+    });
+
+    // Cancel button
+    document.getElementById('pickerCancel').addEventListener('click', () => {
+      customDatePicker.style.display = 'none';
+    });
+
+    // Apply button
+    document.getElementById('pickerApply').addEventListener('click', () => {
+      if (currentPickerInput) {
+        const year = pickerCurrentDate.getFullYear();
+        const month = String(pickerCurrentDate.getMonth() + 1).padStart(2, '0');
+        const day = String(pickerCurrentDate.getDate()).padStart(2, '0');
+        const hour = String(pickerCurrentDate.getHours()).padStart(2, '0');
+        const minute = String(pickerCurrentDate.getMinutes()).padStart(2, '0');
+
+        const dateStr = `${year}-${month}-${day}T${hour}:${minute}`;
+        currentPickerInput.value = dateStr;
+        currentPickerInput.dataset.value = dateStr;
+
+        // Save the date
+        if (currentPickerInput.id === 'fromDate') {
+          saveSetting('fromDate', dateStr, '');
+        } else {
+          saveSetting('toDate', dateStr, '');
+        }
+
+        updateRefreshButton();
+        confirmDateInput(currentPickerInput);
+      }
+      customDatePicker.style.display = 'none';
+    });
+
+    // Month navigation
+    document.querySelectorAll('.date-picker-nav').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const direction = e.target.dataset.direction;
+        if (direction === 'prev') {
+          pickerCurrentDate.setMonth(pickerCurrentDate.getMonth() - 1);
+        } else {
+          pickerCurrentDate.setMonth(pickerCurrentDate.getMonth() + 1);
+        }
+        // Preserve the selected day if possible
+        const selectedDay = document.querySelector('.date-picker-day.selected');
+        if (selectedDay && !selectedDay.classList.contains('empty')) {
+          const day = parseInt(selectedDay.textContent);
+          pickerCurrentDate.setDate(day);
+        }
+        renderDatePicker(pickerCurrentDate);
+      });
+    });
+
+    // Time input changes
+    const handleTimeChange = () => {
+      const hourInput = document.getElementById('pickerHour');
+      const minuteInput = document.getElementById('pickerMinute');
+      let hour = parseInt(hourInput.value) || 0;
+      let minute = parseInt(minuteInput.value) || 0;
+
+      // Clamp values
+      hour = Math.max(0, Math.min(23, hour));
+      minute = Math.max(0, Math.min(59, minute));
+
+      pickerCurrentDate.setHours(hour);
+      pickerCurrentDate.setMinutes(minute);
+    };
+
+    document.getElementById('pickerHour').addEventListener('change', handleTimeChange);
+    document.getElementById('pickerMinute').addEventListener('change', handleTimeChange);
+
+    function renderDatePicker(date) {
+      const year = date.getFullYear();
+      const month = date.getMonth();
+
+      // Update header
+      const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+                          'July', 'August', 'September', 'October', 'November', 'December'];
+      document.querySelector('.date-picker-month-year').textContent = `${monthNames[month]} ${year}`;
+
+      // Update time inputs
+      document.getElementById('pickerHour').value = String(date.getHours()).padStart(2, '0');
+      document.getElementById('pickerMinute').value = String(date.getMinutes()).padStart(2, '0');
+
+      // Generate calendar days
+      const firstDay = new Date(year, month, 1);
+      const lastDay = new Date(year, month + 1, 0);
+      const startDay = firstDay.getDay();
+      const totalDays = lastDay.getDate();
+
+      const today = new Date();
+      const selectedDate = currentPickerInput?.dataset.value;
+      const selectedParts = selectedDate ? selectedDate.split('T')[0].split('-').map(Number) : null;
+
+      let html = '';
+
+      // Empty cells before first day
+      for (let i = 0; i < startDay; i++) {
+        html += '<div class="date-picker-day empty"></div>';
+      }
+
+      // Days of month
+      for (let day = 1; day <= totalDays; day++) {
+        const isToday = day === today.getDate() &&
+                        month === today.getMonth() &&
+                        year === today.getFullYear();
+        const isSelected = selectedParts &&
+                           day === selectedParts[2] &&
+                           month === selectedParts[1] - 1 &&
+                           year === selectedParts[0];
+
+        let classes = 'date-picker-day';
+        if (isToday) classes += ' today';
+        if (isSelected) classes += ' selected';
+
+        html += `<div class="${classes}" data-day="${day}">${day}</div>`;
+      }
+
+      document.querySelector('.date-picker-days').innerHTML = html;
+
+      // Add click handlers to days
+      document.querySelectorAll('.date-picker-day:not(.empty)').forEach(dayEl => {
+        dayEl.addEventListener('click', () => {
+          const day = parseInt(dayEl.dataset.day);
+          pickerCurrentDate.setDate(day);
+          pickerCurrentDate.setHours(
+            parseInt(document.getElementById('pickerHour').value) || 0,
+            parseInt(document.getElementById('pickerMinute').value) || 0,
+            0
+          );
+
+          // Update selection display
+          document.querySelectorAll('.date-picker-day').forEach(d => d.classList.remove('selected'));
+          dayEl.classList.add('selected');
+        });
+      });
+    }
+
+    // Reposition picker when sidebar is toggled
+    const observer = new MutationObserver(() => {
+      if (customDatePicker.style.display !== 'none' && currentPickerInput) {
+        const inputRect = currentPickerInput.getBoundingClientRect();
+        customDatePicker.style.left = inputRect.left + 'px';
+        customDatePicker.style.top = (inputRect.bottom + 5) + 'px';
+      }
+    });
+
+    observer.observe(document.getElementById('sidebar'), { attributes: true, attributeFilter: ['class'] });
+
     document.getElementById('fromDate').addEventListener('change', (e) => {
       saveSetting('fromDate', e.target.value, '');
       updateRefreshButton();
@@ -1224,15 +1436,21 @@
     }
 
     if (savedFrom && savedTo) {
-      fromInput.value = savedFrom;
-      toInput.value = savedTo;
+      fromInput.value = savedFrom.replace('T', ' ');
+      fromInput.dataset.value = savedFrom;
+      toInput.value = savedTo.replace('T', ' ');
+      toInput.dataset.value = savedTo;
     } else {
       const today = new Date();
       const thirtyDaysAgo = new Date(today.getTime() - 29 * 24 * 60 * 60 * 1000);
       thirtyDaysAgo.setHours(0, 0, 0, 0);
       today.setHours(23, 59, 59, 999);
-      toInput.value = formatDateTimeForInput(today);
-      fromInput.value = formatDateTimeForInput(thirtyDaysAgo);
+      const fromStr = formatDateTimeForInput(thirtyDaysAgo);
+      const toStr = formatDateTimeForInput(today);
+      fromInput.value = fromStr.replace('T', ' ');
+      fromInput.dataset.value = fromStr;
+      toInput.value = toStr.replace('T', ' ');
+      toInput.dataset.value = toStr;
     }
 
     handleTimePeriodChange();
@@ -1364,8 +1582,11 @@
         to.setHours(23, 59, 59, 999);
         break;
       case 'custom':
-        from = new Date(document.getElementById('fromDate').value);
-        to = new Date(document.getElementById('toDate').value);
+        // Get dates from custom date picker (stored in dataset.value with 'T' separator)
+        const fromVal = document.getElementById('fromDate').dataset.value || document.getElementById('fromDate').value;
+        const toVal = document.getElementById('toDate').dataset.value || document.getElementById('toDate').value;
+        from = new Date(fromVal.replace(' ', 'T'));
+        to = new Date(toVal.replace(' ', 'T'));
         break;
       default:
         from = new Date(now.getTime() - 29 * 24 * 60 * 60 * 1000);
@@ -1398,11 +1619,17 @@
     // Update the date inputs to reflect the new period
     if (!isCustom) {
       const { from, to } = getDateRange();
-      document.getElementById('fromDate').value = formatDateTimeForInput(from);
-      document.getElementById('toDate').value = formatDateTimeForInput(to);
+      const fromStr = formatDateTimeForInput(from);
+      const toStr = formatDateTimeForInput(to);
+      const fromInput = document.getElementById('fromDate');
+      const toInput = document.getElementById('toDate');
+      fromInput.value = fromStr.replace('T', ' ');
+      fromInput.dataset.value = fromStr;
+      toInput.value = toStr.replace('T', ' ');
+      toInput.dataset.value = toStr;
       // Save the new dates
-      saveSetting('fromDate', formatDateTimeForInput(from), '');
-      saveSetting('toDate', formatDateTimeForInput(to), '');
+      saveSetting('fromDate', fromStr, '');
+      saveSetting('toDate', toStr, '');
     }
 
     // Update the refresh button state
@@ -1490,8 +1717,14 @@
             break;
         }
 
-        document.getElementById('fromDate').value = formatDateTimeForInput(fromDate);
-        document.getElementById('toDate').value = formatDateTimeForInput(toDate);
+        const fromInput = document.getElementById('fromDate');
+        const toInput = document.getElementById('toDate');
+        const fromStr = formatDateTimeForInput(fromDate);
+        const toStr = formatDateTimeForInput(toDate);
+        fromInput.value = fromStr.replace('T', ' ');
+        fromInput.dataset.value = fromStr;
+        toInput.value = toStr.replace('T', ' ');
+        toInput.dataset.value = toStr;
       });
     });
   }

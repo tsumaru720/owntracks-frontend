@@ -90,13 +90,13 @@
         </div>
 
         <div id="customDateRow" style="display: none;">
-          <div class="form-group">
+          <div class="form-group date-input-wrapper" data-for="fromDate">
             <label for="fromDate">From</label>
-            <input type="datetime-local" id="fromDate">
+            <input type="text" id="fromDate" readonly placeholder="Select date and time">
           </div>
-          <div class="form-group">
+          <div class="form-group date-input-wrapper" data-for="toDate">
             <label for="toDate">To</label>
-            <input type="datetime-local" id="toDate">
+            <input type="text" id="toDate" readonly placeholder="Select date and time">
           </div>
         </div>
 
@@ -459,6 +459,28 @@
       </button>
     </div>
   </aside>
+
+  <!-- Custom date picker popup -->
+  <div id="customDatePicker" class="custom-date-picker" style="display: none;">
+    <div class="date-picker-header">
+      <button type="button" class="date-picker-nav" data-direction="prev">‹</button>
+      <span class="date-picker-month-year"></span>
+      <button type="button" class="date-picker-nav" data-direction="next">›</button>
+    </div>
+    <div class="date-picker-days-header">
+      <div>Su</div><div>Mo</div><div>Tu</div><div>We</div><div>Th</div><div>Fr</div><div>Sa</div>
+    </div>
+    <div class="date-picker-days"></div>
+    <div class="date-picker-time">
+      <input type="number" id="pickerHour" min="0" max="23" placeholder="HH">
+      <span>:</span>
+      <input type="number" id="pickerMinute" min="0" max="59" placeholder="MM">
+    </div>
+    <div class="date-picker-footer">
+      <button type="button" class="btn btn-sm btn-secondary" id="pickerCancel">Cancel</button>
+      <button type="button" class="btn btn-sm btn-primary" id="pickerApply">Apply</button>
+    </div>
+  </div>
 
   <!-- Loading Overlay -->
   <div class="loading-overlay" id="loadingOverlay">
