@@ -446,13 +446,14 @@
 
         // Reset to days view when opening
         pickerViewMode = 'days';
-        renderDatePicker(pickerCurrentDate);
 
         // Position and show picker - position it below the clicked input
         const inputRect = e.target.getBoundingClientRect();
         customDatePicker.style.left = inputRect.left + 'px';
         customDatePicker.style.top = (inputRect.bottom + 5) + 'px';
         customDatePicker.style.display = 'block';
+
+        renderDatePicker(pickerCurrentDate);
       });
     });
 
@@ -499,6 +500,7 @@
     // Month/year navigation
     document.querySelectorAll('.date-picker-nav').forEach(btn => {
       btn.addEventListener('click', (e) => {
+        e.stopPropagation();
         const direction = e.target.dataset.direction;
         if (pickerViewMode === 'days') {
           if (direction === 'prev') {
@@ -567,6 +569,7 @@
       // Add click handler for month/year header to switch views
       monthYearEl.onclick = (e) => {
         e.stopPropagation();
+        e.preventDefault();
         if (pickerViewMode === 'days') {
           pickerViewMode = 'months';
         } else if (pickerViewMode === 'months') {
@@ -587,6 +590,9 @@
       if (pickerViewMode === 'days') {
         // Show days header
         daysHeader.style.display = 'grid';
+        // Reset grid to 7 columns for days view
+        daysGrid.style.display = 'grid';
+        daysGrid.style.gridTemplateColumns = '';
 
         // Generate calendar days
         const firstDay = new Date(year, month, 1);
@@ -597,6 +603,9 @@
         const today = new Date();
         const selectedDate = currentPickerInput?.dataset.value;
         const selectedParts = selectedDate ? selectedDate.split('T')[0].split('-').map(Number) : null;
+        const currentPickerDay = pickerCurrentDate.getDate();
+        const currentPickerMonth = pickerCurrentDate.getMonth();
+        const currentPickerYear = pickerCurrentDate.getFullYear();
 
         let html = '';
 
@@ -610,10 +619,15 @@
           const isToday = day === today.getDate() &&
                           month === today.getMonth() &&
                           year === today.getFullYear();
-          const isSelected = selectedParts &&
+          // Check if this day matches either the saved input value or the current picker date
+          const matchesInput = selectedParts &&
                              day === selectedParts[2] &&
                              month === selectedParts[1] - 1 &&
                              year === selectedParts[0];
+          const matchesPicker = day === currentPickerDay &&
+                                month === currentPickerMonth &&
+                                year === currentPickerYear;
+          const isSelected = matchesInput || matchesPicker;
 
           let classes = 'date-picker-day';
           if (isToday) classes += ' today';
@@ -626,7 +640,8 @@
 
         // Add click handlers to days
         document.querySelectorAll('.date-picker-day:not(.empty)').forEach(dayEl => {
-          dayEl.addEventListener('click', () => {
+          dayEl.addEventListener('click', (e) => {
+            e.stopPropagation();
             const day = parseInt(dayEl.dataset.day);
             pickerCurrentDate.setDate(day);
             pickerCurrentDate.setHours(
@@ -671,7 +686,8 @@
 
         // Add click handlers to months
         document.querySelectorAll('.date-picker-day[data-month]').forEach(monthEl => {
-          monthEl.addEventListener('click', () => {
+          monthEl.addEventListener('click', (e) => {
+            e.stopPropagation();
             const month = parseInt(monthEl.dataset.month);
             pickerCurrentDate.setMonth(month);
             pickerViewMode = 'days';
@@ -707,7 +723,8 @@
 
         // Add click handlers to years
         document.querySelectorAll('.date-picker-day[data-year]').forEach(yearEl => {
-          yearEl.addEventListener('click', () => {
+          yearEl.addEventListener('click', (e) => {
+            e.stopPropagation();
             const selectedYear = parseInt(yearEl.dataset.year);
             pickerCurrentDate.setFullYear(selectedYear);
             pickerViewMode = 'months';
