@@ -86,7 +86,7 @@
     return true;
   }
 
-  function init() {
+  async function init() {
     // Check if config is loaded
     if (typeof window.CONFIG === 'undefined') {
       showError('Configuration not loaded. Please copy config.js.example to config.js and add your credentials.');
@@ -103,7 +103,7 @@
     initMap();
 
     // Initialize UI
-    initUI();
+    await initUI();
 
     // Restore sidebar state
     restoreSidebarState();
@@ -384,7 +384,7 @@
   // UI Initialization
   // ============================================================================
 
-  function initUI() {
+  async function initUI() {
     // Date input confirmation helper
     const confirmDateInput = (input) => {
       // Remove the class first to allow re-triggering the animation
@@ -402,10 +402,10 @@
     // Data source controls
     document.getElementById('userSelect').addEventListener('change', handleUserChange);
     document.getElementById('deviceSelect').addEventListener('change', handleDeviceChange);
-    document.getElementById('timePeriod').addEventListener('change', (e) => {
+    document.getElementById('timePeriod').addEventListener('change', async (e) => {
       const value = e.target.value;
       saveSetting('timePeriod', value, '30days');
-      handleTimePeriodChange();
+      await handleTimePeriodChange();
     });
     // Custom date picker functionality
     const customDatePicker = document.getElementById('customDatePicker');
@@ -472,7 +472,7 @@
     });
 
     // Apply button
-    document.getElementById('pickerApply').addEventListener('click', () => {
+    document.getElementById('pickerApply').addEventListener('click', async () => {
       if (currentPickerInput) {
         const year = pickerCurrentDate.getFullYear();
         const month = String(pickerCurrentDate.getMonth() + 1).padStart(2, '0');
@@ -491,7 +491,7 @@
           saveSetting('toDate', dateStr, '');
         }
 
-        updateRefreshButton();
+        await updateRefreshButton();
         confirmDateInput(currentPickerInput);
       }
       customDatePicker.style.display = 'none';
@@ -745,13 +745,13 @@
 
     observer.observe(document.getElementById('sidebar'), { attributes: true, attributeFilter: ['class'] });
 
-    document.getElementById('fromDate').addEventListener('change', (e) => {
+    document.getElementById('fromDate').addEventListener('change', async (e) => {
       saveSetting('fromDate', e.target.value, '');
-      updateRefreshButton();
+      await updateRefreshButton();
     });
-    document.getElementById('toDate').addEventListener('change', (e) => {
+    document.getElementById('toDate').addEventListener('change', async (e) => {
       saveSetting('toDate', e.target.value, '');
-      updateRefreshButton();
+      await updateRefreshButton();
     });
     document.getElementById('loadDataBtn').addEventListener('click', loadData);
     document.getElementById('refreshBtn').addEventListener('click', loadDataFromAPI);
@@ -946,9 +946,9 @@
     });
 
     // Storage
-    document.getElementById('storageEnabled').addEventListener('change', (e) => {
+    document.getElementById('storageEnabled').addEventListener('change', async (e) => {
       saveSetting('storageEnabled', e.target.checked, true);
-      updateRefreshButton();
+      await updateRefreshButton();
     });
 
     // Auto-fit to bounds
@@ -977,54 +977,61 @@
       updateDarkModeToggle();
     });
 
-    // Clear cache button (only removes cached data, keeps settings)
-    document.getElementById('clearCacheBtn').addEventListener('click', () => {
+    // Clear cache button (only removes cached data from IndexedDB, keeps settings in localStorage)
+    document.getElementById('clearCacheBtn').addEventListener('click', async () => {
       if (confirm('Are you sure you want to clear all cached location data? Your display settings and theme will be kept.')) {
-        // Get all localStorage keys
-        const keys = [];
-        for (let i = 0; i < localStorage.length; i++) {
-          const key = localStorage.key(i);
-          if (key) {
-            keys.push(key);
+        try {
+          // Clear IndexedDB cache
+          await idbHelper.clearAllCache();
+
+          // Also clear any legacy localStorage cache keys
+          const keys = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key) {
+              keys.push(key);
+            }
           }
+
+          keys.forEach((key) => {
+            // Keep settings, remove legacy cache keys
+            if (key === 'owntracks_settings') {
+              return;
+            }
+
+            // Remove cache index keys (e.g., "owntracks_cache_user_device_index")
+            if (key.endsWith('_index')) {
+              localStorage.removeItem(key);
+              return;
+            }
+
+            // Remove daily cache keys (contain dates in format YYYY-MM-DD)
+            if (key.match(/\d{4}-\d{2}-\d{2}/)) {
+              localStorage.removeItem(key);
+              return;
+            }
+
+            // Remove any cache keys that start with the cache base
+            const baseKey = window.CONFIG.storage?.key ?? 'owntracks_cache';
+            if (key.startsWith(baseKey)) {
+              localStorage.removeItem(key);
+              return;
+            }
+          });
+
+          // Clear any map data currently displayed
+          clearMapData();
+
+          location.reload();
+        } catch (e) {
+          logError('Failed to clear cache:', e);
+          showError('Failed to clear cache: ' + e.message);
         }
-
-        // Remove only cache-related keys (those ending with _index or dates in format YYYY-MM-DD)
-        keys.forEach((key) => {
-          // Keep settings, remove cache keys
-          if (key === 'owntracks_settings') {
-            return; // Keep settings
-          }
-
-          // Remove cache index keys (e.g., "owntracks_cache_user_device_index")
-          if (key.endsWith('_index')) {
-            localStorage.removeItem(key);
-            return;
-          }
-
-          // Remove daily cache keys (contain dates in format YYYY-MM-DD)
-          if (key.match(/\d{4}-\d{2}-\d{2}/)) {
-            localStorage.removeItem(key);
-            return;
-          }
-
-          // Remove any cache keys that start with the cache base
-          const baseKey = window.CONFIG.storage?.key ?? 'owntracks_cache';
-          if (key.startsWith(baseKey)) {
-            localStorage.removeItem(key);
-            return;
-          }
-        });
-
-        // Clear any map data currently displayed
-        clearMapData();
-
-        location.reload();
       }
     });
 
-    // Clear all settings button
-    document.getElementById('clearStorageBtn').addEventListener('click', () => {
+    // Clear all settings button (clears both IndexedDB cache and localStorage settings)
+    document.getElementById('clearStorageBtn').addEventListener('click', async () => {
       if (confirm('Are you sure you want to clear ALL settings? This will remove cached data, display settings, and your theme preference.')) {
         const settings = (() => {
           try {
@@ -1036,6 +1043,14 @@
           }
         })();
 
+        try {
+          // Clear IndexedDB cache
+          await idbHelper.clearAllCache();
+        } catch (e) {
+          logWarn('Failed to clear IndexedDB while clearing all storage:', e);
+        }
+
+        // Clear all localStorage
         const keys = [];
         for (let i = 0; i < localStorage.length; i++) {
           const key = localStorage.key(i);
@@ -1079,7 +1094,7 @@
     applySettingsToUI();
   }
 
-  function applySettingsToUI() {
+  async function applySettingsToUI() {
     // Display options - visibility toggles
     document.getElementById('showPoints').checked = getSetting('showPoints', true);
     document.getElementById('showLines').checked = getSetting('showLines', true);
@@ -1170,7 +1185,7 @@
 
     // Storage
     document.getElementById('storageEnabled').checked = getSetting('storageEnabled', true);
-    updateRefreshButton();
+    await updateRefreshButton();
 
     // Auto-fit to bounds
     document.getElementById('autoFitToBounds').checked = getSetting('autoFitToBounds', true);
@@ -1573,7 +1588,7 @@
   // Date Management
   // ============================================================================
 
-  function setDefaultDates() {
+  async function setDefaultDates() {
     const savedPeriod = getSetting('timePeriod', '30days');
     const savedFrom = getSetting('fromDate', '');
     const savedTo = getSetting('toDate', '');
@@ -1603,7 +1618,7 @@
       toInput.dataset.value = toStr;
     }
 
-    handleTimePeriodChange();
+    await handleTimePeriodChange();
     initQuickRangeButtons();
   }
 
@@ -1757,7 +1772,7 @@
     }).format(date);
   }
 
-  function handleTimePeriodChange() {
+  async function handleTimePeriodChange() {
     const period = document.getElementById('timePeriod').value;
     const isCustom = period === 'custom';
     const customDateRow = document.getElementById('customDateRow');
@@ -1783,7 +1798,7 @@
     }
 
     // Update the refresh button state
-    updateRefreshButton();
+    await updateRefreshButton();
 
     // If the display state changed, update parent section height
     if (prevDisplay !== customDateRow.style.display) {
@@ -2021,7 +2036,7 @@
         // Only auto-load if there's cached data
         const storageEnabled = getSetting('storageEnabled', true);
         if (storageEnabled) {
-          const cachedDays = getCachedDays(user, deviceSelect.value);
+          const cachedDays = await getCachedDays(user, deviceSelect.value);
           if (cachedDays.size > 0) {
             // Has cached data, load it
             await loadData();
@@ -2073,7 +2088,7 @@
 
       if (storageEnabled) {
         // Load cached days
-        const cachedDays = getCachedDays(user, device);
+        const cachedDays = await getCachedDays(user, device);
         log('Requested days:', requestedDays);
         log('Cached days:', Array.from(cachedDays));
         const daysToLoad = requestedDays.filter(day => cachedDays.has(day));
@@ -2081,14 +2096,14 @@
 
         if (daysToLoad.length > 0) {
           showLoading(`Loading ${daysToLoad.length} cached days...`);
-          allData = loadCachedDays(user, device, daysToLoad);
+          allData = await loadCachedDays(user, device, daysToLoad);
           cachedPointCount = allData.length;
         }
       }
 
       // Find uncached day ranges
       const uncachedRanges = storageEnabled
-        ? getUncachedDayRanges(user, device, requestedDays)
+        ? await getUncachedDayRanges(user, device, requestedDays)
         : [{ from: fromDate, to: toDate }];
 
       log('Uncached ranges:', uncachedRanges);
@@ -2114,13 +2129,13 @@
           // If so, do a smart incremental update from the last cached point to midnight
           const todayKey = formatDateForInput(new Date());
           const todayInThisRange = daysInThisRange.includes(todayKey);
-          const cachedDays = getCachedDays(user, device);
+          const cachedDays = await getCachedDays(user, device);
           let effectiveRangeFrom = rangeFrom;
           let effectiveRangeTo = rangeTo;
 
           if (storageEnabled && todayInThisRange && cachedDays.has(todayKey)) {
             // Smart incremental update for today - from last cached point to midnight
-            const latestCachedTs = getLatestCachedTimestamp(user, device, [todayKey]);
+            const latestCachedTs = await getLatestCachedTimestamp(user, device, [todayKey]);
             if (latestCachedTs) {
               const midnightTonight = new Date(range.to + 'T23:59:59');
               effectiveRangeFrom = new Date((latestCachedTs + 1) * 1000);
@@ -2169,7 +2184,7 @@
           // Cache the data by day if storage is enabled
           if (storageEnabled && rangeData.length > 0) {
             const dailyData = splitDataByDays(rangeData, range.from, range.to);
-            cacheDailyData(user, device, dailyData);
+            await cacheDailyData(user, device, dailyData);
           }
 
           allData = allData.concat(rangeData);
@@ -2221,7 +2236,7 @@
 
       // Update stats and cache status
       updateStats();
-      updateRefreshButton();
+      await updateRefreshButton();
 
       // Redraw map
       redrawMap();
@@ -2283,6 +2298,265 @@
   }
 
   // ============================================================================
+  // IndexedDB Cache Management
+  // ============================================================================
+
+  const DB_NAME = 'OwnTracksCache';
+  const DB_VERSION = 1;
+  const STORE_CACHE = 'cacheDays';
+  const STORE_INDEX = 'cacheIndex';
+
+  // IndexedDB helper with promise-based API
+  const idbHelper = {
+    db: null,
+
+    // Open the database and create schema if needed
+    async open() {
+      if (this.db) return this.db;
+
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          this.db = request.result;
+          resolve(this.db);
+        };
+
+        request.onupgradeneeded = (event) => {
+          const db = event.target.result;
+
+          // Create cacheDays store with compound key [user, device, date]
+          if (!db.objectStoreNames.contains(STORE_CACHE)) {
+            const cacheStore = db.createObjectStore(STORE_CACHE, {
+              keyPath: ['user', 'device', 'date']
+            });
+            log('Created IndexedDB cache store');
+          }
+
+          // Create cacheIndex store for tracking cached days per user/device
+          if (!db.objectStoreNames.contains(STORE_INDEX)) {
+            const indexStore = db.createObjectStore(STORE_INDEX, {
+              keyPath: ['user', 'device']
+            });
+            log('Created IndexedDB index store');
+          }
+        };
+      });
+    },
+
+    // Get cached days for a user/device
+    async getCachedDays(user, device) {
+      const db = await this.open();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction([STORE_INDEX], 'readonly');
+        const store = tx.objectStore(STORE_INDEX);
+        const request = store.get([user, device]);
+
+        request.onsuccess = () => {
+          const result = request.result;
+          if (result && result.days) {
+            resolve(new Set(result.days));
+          } else {
+            resolve(new Set());
+          }
+        };
+        request.onerror = () => reject(request.error);
+      });
+    },
+
+    // Update cache index with new days
+    async updateCacheIndex(user, device, newDays) {
+      const db = await this.open();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction([STORE_INDEX], 'readwrite');
+        const store = tx.objectStore(STORE_INDEX);
+
+        // Get existing index
+        const getRequest = store.get([user, device]);
+        getRequest.onsuccess = () => {
+          const existing = getRequest.result || { days: [] };
+          const existingDays = new Set(existing.days || []);
+          newDays.forEach(day => existingDays.add(day));
+
+          // Put updated index
+          const putRequest = store.put({
+            user,
+            device,
+            days: Array.from(existingDays),
+            lastUpdated: new Date().toISOString()
+          });
+
+          putRequest.onerror = () => reject(putRequest.error);
+        };
+        getRequest.onerror = () => reject(getRequest.error);
+
+        // Wait for transaction to complete
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    },
+
+    // Get cached data for specific days
+    async getCachedData(user, device, days) {
+      const db = await this.open();
+      const results = [];
+
+      for (const day of days) {
+        const dayData = await this.getDayData(user, device, day);
+        if (dayData) {
+          results.push(...dayData);
+        }
+      }
+
+      return results;
+    },
+
+    // Get data for a single day
+    async getDayData(user, device, dateStr) {
+      const db = await this.open();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction([STORE_CACHE], 'readonly');
+        const store = tx.objectStore(STORE_CACHE);
+        const request = store.get([user, device, dateStr]);
+
+        request.onsuccess = () => {
+          const result = request.result;
+          if (result && result.data) {
+            try {
+              const points = decompressPoints(result.data);
+              resolve(points);
+            } catch (e) {
+              logWarn(`Failed to decompress cached day ${dateStr}:`, e);
+              resolve([]);
+            }
+          } else {
+            resolve([]);
+          }
+        };
+        request.onerror = () => reject(request.error);
+      });
+    },
+
+    // Store data for a specific day
+    async setDayData(user, device, dateStr, points) {
+      const db = await this.open();
+      return new Promise((resolve, reject) => {
+        try {
+          const compressed = compressPoints(points);
+
+          const tx = db.transaction([STORE_CACHE], 'readwrite');
+          const store = tx.objectStore(STORE_CACHE);
+
+          const request = store.put({
+            user,
+            device,
+            date: dateStr,
+            data: compressed, // Store as raw Uint8Array or string
+            cachedAt: new Date().toISOString()
+          });
+
+          request.onsuccess = () => {
+            log(`Cached ${points.length} points for ${dateStr}`);
+          };
+          request.onerror = () => reject(request.error);
+
+          // Wait for transaction to complete
+          tx.oncomplete = () => resolve(true);
+          tx.onerror = () => reject(tx.error);
+        } catch (e) {
+          reject(e);
+        }
+      });
+    },
+
+    // Get latest cached timestamp for a set of days
+    async getLatestCachedTimestamp(user, device, days) {
+      const data = await this.getCachedData(user, device, days);
+      if (!data.length) return null;
+      return Math.max(...data.map(point => Number(point.tst) || 0));
+    },
+
+    // Clear all cache data for all users/devices
+    async clearAllCache() {
+      const db = await this.open();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction([STORE_CACHE, STORE_INDEX], 'readwrite');
+
+        const cacheStore = tx.objectStore(STORE_CACHE);
+        cacheStore.clear();
+
+        const indexStore = tx.objectStore(STORE_INDEX);
+        indexStore.clear();
+
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    },
+
+    // Clear cache for a specific user/device
+    async clearUserCache(user, device) {
+      const db = await this.open();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction([STORE_CACHE, STORE_INDEX], 'readwrite');
+
+        // Clear index for this user/device
+        const indexStore = tx.objectStore(STORE_INDEX);
+        indexStore.delete([user, device]);
+
+        // Clear all cache entries for this user/device
+        // Note: We need to iterate since we can't do a range delete on compound keys efficiently
+        const cacheStore = tx.objectStore(STORE_CACHE);
+        const request = cacheStore.openCursor(
+          IDBKeyRange.bound([user, device, ''], [user, device, '￿'])
+        );
+
+        request.onsuccess = (event) => {
+          const cursor = event.target.result;
+          if (cursor) {
+            cursor.delete();
+            cursor.continue();
+          }
+        };
+
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    },
+
+    // Calculate storage usage for IndexedDB
+    async getStorageUsage() {
+      const db = await this.open();
+      return new Promise((resolve, reject) => {
+        let totalBytes = 0;
+
+        const tx = db.transaction([STORE_CACHE], 'readonly');
+        const store = tx.objectStore(STORE_CACHE);
+        const request = store.openCursor();
+
+        request.onsuccess = (event) => {
+          const cursor = event.target.result;
+          if (cursor) {
+            const value = cursor.value;
+            // Estimate size: data buffer size + metadata
+            if (value.data) {
+              if (value.data instanceof Uint8Array) {
+                totalBytes += value.data.byteLength;
+              } else {
+                totalBytes += value.data.length * 2; // UTF-16 string
+              }
+            }
+            cursor.continue();
+          }
+        };
+
+        tx.oncomplete = () => resolve(totalBytes);
+        tx.onerror = () => reject(tx.error);
+      });
+    }
+  };
+
+  // ============================================================================
   // Data Management
   // ============================================================================
 
@@ -2304,55 +2578,55 @@
     return days;
   }
 
-  // Get cache index key for user/device
+  // Get cache index key for user/device (kept for compatibility, now uses IndexedDB)
   function getCacheIndexKey(user, device) {
     const baseKey = window.CONFIG.storage?.key ?? 'owntracks_cache';
     return `${baseKey}_${user}_${device}_index`;
   }
 
-  // Get cache key for a specific day
+  // Get cache key for a specific day (kept for compatibility, now uses IndexedDB)
   function getDayCacheKey(user, device, dateStr) {
     const baseKey = window.CONFIG.storage?.key ?? 'owntracks_cache';
     return `${baseKey}_${user}_${device}_${dateStr}`;
   }
 
-  function getLatestCachedTimestamp(user, device, days) {
-    const cachedData = loadCachedDays(user, device, days);
-    if (!cachedData.length) {
+  // Get set of cached days for user/device (now uses IndexedDB)
+  async function getCachedDays(user, device) {
+    try {
+      return await idbHelper.getCachedDays(user, device);
+    } catch (e) {
+      logWarn('Failed to get cached days from IndexedDB:', e);
+      return new Set();
+    }
+  }
+
+  // Update cache index with new days (now uses IndexedDB)
+  async function updateCacheIndex(user, device, newDays) {
+    try {
+      await idbHelper.updateCacheIndex(user, device, newDays);
+    } catch (e) {
+      logWarn('Failed to update cache index:', e);
+    }
+  }
+
+  // Get latest cached timestamp (now uses IndexedDB)
+  async function getLatestCachedTimestamp(user, device, days) {
+    try {
+      return await idbHelper.getLatestCachedTimestamp(user, device, days);
+    } catch (e) {
+      logWarn('Failed to get latest cached timestamp:', e);
       return null;
     }
-
-    return Math.max(...cachedData.map(point => Number(point.tst) || 0));
   }
 
-  // Get set of cached days for user/device
-  function getCachedDays(user, device) {
-    const indexKey = getCacheIndexKey(user, device);
-    const indexData = localStorage.getItem(indexKey);
-
-    if (indexData) {
-      try {
-        const index = JSON.parse(indexData);
-        return new Set(index.days || []);
-      } catch (e) {
-        logWarn('Failed to parse cache index:', e);
-      }
+  // Load cached data for specific days (now uses IndexedDB)
+  async function loadCachedDays(user, device, days) {
+    try {
+      return await idbHelper.getCachedData(user, device, days);
+    } catch (e) {
+      logWarn('Failed to load cached days:', e);
+      return [];
     }
-
-    return new Set();
-  }
-
-  // Update cache index with new days
-  function updateCacheIndex(user, device, newDays) {
-    const indexKey = getCacheIndexKey(user, device);
-    const cachedDays = getCachedDays(user, device);
-
-    newDays.forEach(day => cachedDays.add(day));
-
-    localStorage.setItem(indexKey, JSON.stringify({
-      days: Array.from(cachedDays),
-      lastUpdated: new Date().toISOString()
-    }));
   }
 
   // Split API response data into per-day chunks
@@ -2380,29 +2654,7 @@
     return dailyData;
   }
 
-  // Load cached data for specific days
-  function loadCachedDays(user, device, days) {
-    const cachedData = [];
-
-    days.forEach(day => {
-      const dayKey = getDayCacheKey(user, device, day);
-      const dayData = localStorage.getItem(dayKey);
-
-      if (dayData) {
-        try {
-          const parsed = JSON.parse(dayData);
-          const points = decompressPoints(parsed.data || parsed.points || '');
-          cachedData.push(...points);
-        } catch (e) {
-          logWarn(`Failed to parse cached day ${day}:`, e);
-        }
-      }
-    });
-
-    return cachedData;
-  }
-
-  // Convert Uint8Array to base64 string for localStorage storage
+  // Convert Uint8Array to base64 string (for legacy localStorage compatibility)
   function uint8ArrayToBase64(bytes) {
     let binary = '';
     const len = bytes.byteLength;
@@ -2412,7 +2664,7 @@
     return btoa(binary);
   }
 
-  // Convert base64 string back to Uint8Array
+  // Convert base64 string back to Uint8Array (for legacy localStorage compatibility)
   function base64ToUint8Array(base64) {
     const binary = atob(base64);
     const len = binary.length;
@@ -2424,9 +2676,9 @@
   }
 
   // Compress data using gzip compression
-  // Gzip efficiently handles repeated property names, so no need for array conversion
+  // Returns Uint8Array for IndexedDB storage (no base64 overhead)
   function compressPoints(points) {
-    if (!points || points.length === 0) return '';
+    if (!points || points.length === 0) return new Uint8Array(0);
 
     // Round coordinates to 5 decimal places (~1 meter precision) to reduce storage size
     const optimized = points.map(p => ({
@@ -2441,40 +2693,69 @@
     if (typeof window.pako !== 'undefined') {
       try {
         // Compress with gzip (highest compression level)
-        const compressed = window.pako.gzip(jsonStr, { level: 9 });
-        // Convert to base64 for localStorage storage
-        return uint8ArrayToBase64(compressed);
+        // Return Uint8Array directly for IndexedDB (no base64 conversion!)
+        return window.pako.gzip(jsonStr, { level: 9 });
       } catch (e) {
         logWarn('Gzip compression failed, using uncompressed:', e);
-        return jsonStr;
+        // Return as Uint8Array for consistency
+        const encoder = new TextEncoder();
+        return encoder.encode(jsonStr);
       }
     }
 
-    // Fallback: just use the JSON string
-    return jsonStr;
+    // Fallback: encode JSON string to Uint8Array
+    const encoder = new TextEncoder();
+    return encoder.encode(jsonStr);
   }
 
   // Decompress data back to point objects
+  // Handles both Uint8Array (IndexedDB) and base64 strings (legacy localStorage)
   function decompressPoints(compressed) {
     if (!compressed) return [];
 
+    // Handle empty Uint8Array
+    if (compressed instanceof Uint8Array && compressed.byteLength === 0) {
+      return [];
+    }
+
     let jsonStr;
 
-    // Check if it's base64-encoded gzip data (no newlines, valid base64 chars)
-    // If it's compressed, it likely won't have spaces and will be base64
-    if (typeof window.pako !== 'undefined' && !compressed.includes(' ') && compressed.length > 50) {
-      try {
-        // Try to decompress as gzip
-        const compressedData = base64ToUint8Array(compressed);
-        const decompressed = window.pako.ungzip(compressedData, { to: 'string' });
-        jsonStr = decompressed;
-      } catch (e) {
-        // Not compressed data, use as-is
+    // Check if input is Uint8Array (from IndexedDB)
+    if (compressed instanceof Uint8Array) {
+      if (typeof window.pako !== 'undefined') {
+        try {
+          // Try to decompress as gzip
+          const decompressed = window.pako.ungzip(compressed, { to: 'string' });
+          jsonStr = decompressed;
+        } catch (e) {
+          // Not compressed, decode as UTF-8
+          const decoder = new TextDecoder();
+          jsonStr = decoder.decode(compressed);
+        }
+      } else {
+        // No pako, decode as UTF-8
+        const decoder = new TextDecoder();
+        jsonStr = decoder.decode(compressed);
+      }
+    } else if (typeof compressed === 'string') {
+      // Legacy base64 format from localStorage
+      // Check if it's base64-encoded gzip data (no newlines, valid base64 chars)
+      if (typeof window.pako !== 'undefined' && !compressed.includes(' ') && compressed.length > 50) {
+        try {
+          const compressedData = base64ToUint8Array(compressed);
+          const decompressed = window.pako.ungzip(compressedData, { to: 'string' });
+          jsonStr = decompressed;
+        } catch (e) {
+          // Not compressed data, use as-is
+          jsonStr = compressed;
+        }
+      } else {
+        // Plain JSON
         jsonStr = compressed;
       }
     } else {
-      // Plain JSON or legacy format
-      jsonStr = compressed;
+      logWarn('Unknown compressed data type:', typeof compressed);
+      return [];
     }
 
     const data = JSON.parse(jsonStr);
@@ -2489,57 +2770,40 @@
     return [];
   }
 
-  // Store daily data chunks to cache with compression and quota handling
-  function cacheDailyData(user, device, dailyData) {
-    Object.entries(dailyData).forEach(([day, points]) => {
-      const dayKey = getDayCacheKey(user, device, day);
+  // Store daily data chunks to IndexedDB cache with compression
+  async function cacheDailyData(user, device, dailyData) {
+    const successfullyCached = [];
 
+    for (const [day, points] of Object.entries(dailyData)) {
       try {
-        // Compress and store the data
-        const compressed = compressPoints(points);
-        localStorage.setItem(dayKey, JSON.stringify({
-          data: compressed,
-          cachedAt: new Date().toISOString()
-        }));
-        log(`Cached ${points.length} points for ${day}`);
-      } catch (quotaError) {
-        if (quotaError.name === 'QuotaExceededError') {
-          // Compression wasn't enough - data is too large
-          logWarn(`Storage quota exceeded for ${day} (${points.length} points). Skipping cache for this day.`);
+        // Compress and store the data directly to IndexedDB
+        await idbHelper.setDayData(user, device, day, points);
+        successfullyCached.push(day);
+      } catch (e) {
+        logWarn(`Failed to cache ${day} (${points.length} points):`, e);
 
-          // Show a warning to the user
-          const warningEl = document.getElementById('headerStatus');
-          if (warningEl) {
-            warningEl.textContent = `Warning: Some data too large to cache (${day})`;
-            setTimeout(() => {
-              if (warningEl.textContent.includes('too large to cache')) {
-                warningEl.textContent = '';
-              }
-            }, 5000);
-          }
-        } else {
-          throw quotaError;
+        // Show a warning to the user
+        const warningEl = document.getElementById('headerStatus');
+        if (warningEl) {
+          warningEl.textContent = `Warning: Failed to cache data for ${day}`;
+          setTimeout(() => {
+            if (warningEl.textContent.includes('Failed to cache')) {
+              warningEl.textContent = '';
+            }
+          }, 5000);
         }
       }
-    });
+    }
 
-    // Update index with only successfully cached days
-    const successfullyCached = [];
-    Object.entries(dailyData).forEach(([day, points]) => {
-      const dayKey = getDayCacheKey(user, device, day);
-      if (localStorage.getItem(dayKey)) {
-        successfullyCached.push(day);
-      }
-    });
-
+    // Update index with successfully cached days
     if (successfullyCached.length > 0) {
-      updateCacheIndex(user, device, successfullyCached);
+      await updateCacheIndex(user, device, successfullyCached);
     }
   }
 
   // Get date ranges for uncached days (for API calls)
-  function getUncachedDayRanges(user, device, requestedDays) {
-    const cachedDays = getCachedDays(user, device);
+  async function getUncachedDayRanges(user, device, requestedDays) {
+    const cachedDays = await getCachedDays(user, device);
     const uncachedDays = requestedDays.filter(day => !cachedDays.has(day));
 
     if (uncachedDays.length === 0) {
@@ -2583,17 +2847,17 @@
     updateStats();
   }
 
-  function handleUserChange() {
+  async function handleUserChange() {
     const user = document.getElementById('userSelect').value;
     saveSetting('selectedUser', user, '');
-    fetchDevices(user);
-    updateRefreshButton();
+    await fetchDevices(user);
+    await updateRefreshButton();
   }
 
-  function handleDeviceChange() {
+  async function handleDeviceChange() {
     const device = document.getElementById('deviceSelect').value;
     saveSetting('selectedDevice', device, '');
-    updateRefreshButton();
+    await updateRefreshButton();
   }
 
   // ============================================================================
@@ -3116,27 +3380,27 @@
     document.getElementById('statVisible').textContent = visibleInViewport.toLocaleString();
   }
 
-  // Calculate storage usage for localStorage
-  function calculateStorageUsage() {
-    let totalBytes = 0;
-    let cacheBytes = 0;
-    const baseKey = window.CONFIG.storage?.key ?? 'owntracks_cache';
-
+  // Calculate storage usage for IndexedDB cache
+  async function calculateStorageUsage() {
+    // Calculate localStorage usage (settings only)
+    let localStorageBytes = 0;
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
       if (key) {
         const value = localStorage.getItem(key);
-        const bytes = (key.length + value.length) * 2; // UTF-16 chars are 2 bytes
-        totalBytes += bytes;
-
-        // Count cache-related storage
-        if (key.startsWith(baseKey) || key === 'owntracks_settings') {
-          cacheBytes += bytes;
-        }
+        localStorageBytes += (key.length + value.length) * 2; // UTF-16 chars are 2 bytes
       }
     }
 
-    return { total: totalBytes, cache: cacheBytes };
+    // Calculate IndexedDB cache usage
+    let cacheBytes = 0;
+    try {
+      cacheBytes = await idbHelper.getStorageUsage();
+    } catch (e) {
+      logWarn('Failed to calculate IndexedDB usage:', e);
+    }
+
+    return { total: localStorageBytes + cacheBytes, cache: cacheBytes };
   }
 
   // Format bytes as human-readable string
@@ -3148,7 +3412,7 @@
     return (bytes / Math.pow(k, i)).toFixed(1).replace('.0', '') + ' ' + sizes[i];
   }
 
-  function updateRefreshButton() {
+  async function updateRefreshButton() {
     const storageEnabled = getSetting('storageEnabled', true);
     const user = document.getElementById('userSelect').value;
     const device = document.getElementById('deviceSelect').value;
@@ -3162,7 +3426,7 @@
       const fromDate = formatDateForInput(from);
       const toDate = formatDateForInput(to);
       const requestedDays = getDaysInRange(fromDate, toDate);
-      const cachedDays = getCachedDays(user, device);
+      const cachedDays = await getCachedDays(user, device);
 
       requestedCount = requestedDays.length;
 
@@ -3193,13 +3457,13 @@
     const cacheStatusEl = document.getElementById('cacheStatus');
     if (storageEnabled && user && device) {
       cacheStatusEl.style.display = 'block';
-      const totalCached = getCachedDays(user, device).size;
-      const usage = calculateStorageUsage();
+      const totalCached = (await getCachedDays(user, device)).size;
+      const usage = await calculateStorageUsage();
       document.getElementById('cacheStatusText').textContent =
         `Cache: ${totalCached} day${totalCached === 1 ? '' : 's'} stored for ${user}/${device} (${formatBytes(usage.cache)} used)`;
     } else if (storageEnabled) {
       cacheStatusEl.style.display = 'block';
-      const usage = calculateStorageUsage();
+      const usage = await calculateStorageUsage();
       document.getElementById('cacheStatusText').textContent =
         `Cache: enabled (no data cached yet, ${formatBytes(usage.cache)} used)`;
     } else {
@@ -3259,7 +3523,7 @@
       // Cache the data by day if storage is enabled
       if (storageEnabled && allData.length > 0) {
         const dailyData = splitDataByDays(allData, fromDate, toDate);
-        cacheDailyData(user, device, dailyData);
+        await cacheDailyData(user, device, dailyData);
         log(`[Refresh Debug] Cached ${allData.length} points across ${requestedDays.length} day(s)`);
       }
 
