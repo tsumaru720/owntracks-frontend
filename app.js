@@ -411,6 +411,7 @@
     const customDatePicker = document.getElementById('customDatePicker');
     let currentPickerInput = null;
     let pickerCurrentDate = new Date();
+    let pickerViewMode = 'days'; // 'days', 'months', or 'years'
 
     // Open date picker when input is clicked
     document.querySelectorAll('.date-input-wrapper input').forEach(input => {
@@ -443,6 +444,8 @@
           pickerCurrentDate.setMinutes(0, 0, 0);
         }
 
+        // Reset to days view when opening
+        pickerViewMode = 'days';
         renderDatePicker(pickerCurrentDate);
 
         // Position and show picker - position it below the clicked input
@@ -493,20 +496,34 @@
       customDatePicker.style.display = 'none';
     });
 
-    // Month navigation
+    // Month/year navigation
     document.querySelectorAll('.date-picker-nav').forEach(btn => {
       btn.addEventListener('click', (e) => {
         const direction = e.target.dataset.direction;
-        if (direction === 'prev') {
-          pickerCurrentDate.setMonth(pickerCurrentDate.getMonth() - 1);
-        } else {
-          pickerCurrentDate.setMonth(pickerCurrentDate.getMonth() + 1);
-        }
-        // Preserve the selected day if possible
-        const selectedDay = document.querySelector('.date-picker-day.selected');
-        if (selectedDay && !selectedDay.classList.contains('empty')) {
-          const day = parseInt(selectedDay.textContent);
-          pickerCurrentDate.setDate(day);
+        if (pickerViewMode === 'days') {
+          if (direction === 'prev') {
+            pickerCurrentDate.setMonth(pickerCurrentDate.getMonth() - 1);
+          } else {
+            pickerCurrentDate.setMonth(pickerCurrentDate.getMonth() + 1);
+          }
+          // Preserve the selected day if possible
+          const selectedDay = document.querySelector('.date-picker-day.selected');
+          if (selectedDay && !selectedDay.classList.contains('empty')) {
+            const day = parseInt(selectedDay.textContent);
+            pickerCurrentDate.setDate(day);
+          }
+        } else if (pickerViewMode === 'months') {
+          if (direction === 'prev') {
+            pickerCurrentDate.setFullYear(pickerCurrentDate.getFullYear() - 1);
+          } else {
+            pickerCurrentDate.setFullYear(pickerCurrentDate.getFullYear() + 1);
+          }
+        } else if (pickerViewMode === 'years') {
+          if (direction === 'prev') {
+            pickerCurrentDate.setFullYear(pickerCurrentDate.getFullYear() - 12);
+          } else {
+            pickerCurrentDate.setFullYear(pickerCurrentDate.getFullYear() + 12);
+          }
         }
         renderDatePicker(pickerCurrentDate);
       });
@@ -534,67 +551,170 @@
       const year = date.getFullYear();
       const month = date.getMonth();
 
-      // Update header
+      // Update header - add click hint in year/month mode
       const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
                           'July', 'August', 'September', 'October', 'November', 'December'];
-      document.querySelector('.date-picker-month-year').textContent = `${monthNames[month]} ${year}`;
+      const monthYearEl = document.querySelector('.date-picker-month-year');
+
+      if (pickerViewMode === 'days') {
+        monthYearEl.textContent = `${monthNames[month]} ${year}`;
+      } else if (pickerViewMode === 'months') {
+        monthYearEl.textContent = `${year}`;
+      } else {
+        monthYearEl.textContent = 'Select Year';
+      }
+
+      // Add click handler for month/year header to switch views
+      monthYearEl.onclick = (e) => {
+        e.stopPropagation();
+        if (pickerViewMode === 'days') {
+          pickerViewMode = 'months';
+        } else if (pickerViewMode === 'months') {
+          pickerViewMode = 'years';
+        } else {
+          pickerViewMode = 'days';
+        }
+        renderDatePicker(pickerCurrentDate);
+      };
 
       // Update time inputs
       document.getElementById('pickerHour').value = String(date.getHours()).padStart(2, '0');
       document.getElementById('pickerMinute').value = String(date.getMinutes()).padStart(2, '0');
 
-      // Generate calendar days
-      const firstDay = new Date(year, month, 1);
-      const lastDay = new Date(year, month + 1, 0);
-      const startDay = firstDay.getDay();
-      const totalDays = lastDay.getDate();
+      const daysHeader = document.querySelector('.date-picker-days-header');
+      const daysGrid = document.querySelector('.date-picker-days');
 
-      const today = new Date();
-      const selectedDate = currentPickerInput?.dataset.value;
-      const selectedParts = selectedDate ? selectedDate.split('T')[0].split('-').map(Number) : null;
+      if (pickerViewMode === 'days') {
+        // Show days header
+        daysHeader.style.display = 'grid';
 
-      let html = '';
+        // Generate calendar days
+        const firstDay = new Date(year, month, 1);
+        const lastDay = new Date(year, month + 1, 0);
+        const startDay = firstDay.getDay();
+        const totalDays = lastDay.getDate();
 
-      // Empty cells before first day
-      for (let i = 0; i < startDay; i++) {
-        html += '<div class="date-picker-day empty"></div>';
-      }
+        const today = new Date();
+        const selectedDate = currentPickerInput?.dataset.value;
+        const selectedParts = selectedDate ? selectedDate.split('T')[0].split('-').map(Number) : null;
 
-      // Days of month
-      for (let day = 1; day <= totalDays; day++) {
-        const isToday = day === today.getDate() &&
-                        month === today.getMonth() &&
-                        year === today.getFullYear();
-        const isSelected = selectedParts &&
-                           day === selectedParts[2] &&
-                           month === selectedParts[1] - 1 &&
-                           year === selectedParts[0];
+        let html = '';
 
-        let classes = 'date-picker-day';
-        if (isToday) classes += ' today';
-        if (isSelected) classes += ' selected';
+        // Empty cells before first day
+        for (let i = 0; i < startDay; i++) {
+          html += '<div class="date-picker-day empty"></div>';
+        }
 
-        html += `<div class="${classes}" data-day="${day}">${day}</div>`;
-      }
+        // Days of month
+        for (let day = 1; day <= totalDays; day++) {
+          const isToday = day === today.getDate() &&
+                          month === today.getMonth() &&
+                          year === today.getFullYear();
+          const isSelected = selectedParts &&
+                             day === selectedParts[2] &&
+                             month === selectedParts[1] - 1 &&
+                             year === selectedParts[0];
 
-      document.querySelector('.date-picker-days').innerHTML = html;
+          let classes = 'date-picker-day';
+          if (isToday) classes += ' today';
+          if (isSelected) classes += ' selected';
 
-      // Add click handlers to days
-      document.querySelectorAll('.date-picker-day:not(.empty)').forEach(dayEl => {
-        dayEl.addEventListener('click', () => {
-          const day = parseInt(dayEl.dataset.day);
-          pickerCurrentDate.setDate(day);
-          pickerCurrentDate.setHours(
-            parseInt(document.getElementById('pickerHour').value) || 0,
-            parseInt(document.getElementById('pickerMinute').value) || 0,
-            0
-          );
+          html += `<div class="${classes}" data-day="${day}">${day}</div>`;
+        }
 
-          // Update selection display
-          document.querySelectorAll('.date-picker-day').forEach(d => d.classList.remove('selected'));
-          dayEl.classList.add('selected');
+        daysGrid.innerHTML = html;
+
+        // Add click handlers to days
+        document.querySelectorAll('.date-picker-day:not(.empty)').forEach(dayEl => {
+          dayEl.addEventListener('click', () => {
+            const day = parseInt(dayEl.dataset.day);
+            pickerCurrentDate.setDate(day);
+            pickerCurrentDate.setHours(
+              parseInt(document.getElementById('pickerHour').value) || 0,
+              parseInt(document.getElementById('pickerMinute').value) || 0,
+              0
+            );
+
+            // Update selection display
+            document.querySelectorAll('.date-picker-day').forEach(d => d.classList.remove('selected'));
+            dayEl.classList.add('selected');
+          });
         });
-      });
+      } else if (pickerViewMode === 'months') {
+        // Hide days header
+        daysHeader.style.display = 'none';
+
+        const today = new Date();
+        const selectedDate = currentPickerInput?.dataset.value;
+        const selectedParts = selectedDate ? selectedDate.split('T')[0].split('-').map(Number) : null;
+
+        let html = '';
+        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                            'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+        for (let m = 0; m < 12; m++) {
+          const isSelected = selectedParts &&
+                             m === selectedParts[1] - 1 &&
+                             year === selectedParts[0];
+          const isToday = m === today.getMonth() && year === today.getFullYear();
+
+          let classes = 'date-picker-day';
+          if (isSelected) classes += ' selected';
+          if (isToday) classes += ' today';
+
+          html += `<div class="${classes}" data-month="${m}">${monthNames[m]}</div>`;
+        }
+
+        daysGrid.innerHTML = html;
+        daysGrid.style.display = 'grid';
+        daysGrid.style.gridTemplateColumns = 'repeat(3, 1fr)';
+
+        // Add click handlers to months
+        document.querySelectorAll('.date-picker-day[data-month]').forEach(monthEl => {
+          monthEl.addEventListener('click', () => {
+            const month = parseInt(monthEl.dataset.month);
+            pickerCurrentDate.setMonth(month);
+            pickerViewMode = 'days';
+            renderDatePicker(pickerCurrentDate);
+          });
+        });
+      } else if (pickerViewMode === 'years') {
+        // Hide days header
+        daysHeader.style.display = 'none';
+
+        const today = new Date();
+        const selectedDate = currentPickerInput?.dataset.value;
+        const selectedParts = selectedDate ? selectedDate.split('T')[0].split('-').map(Number) : null;
+
+        // Show 12 years centered around current year
+        const startYear = Math.floor(year / 12) * 12;
+        let html = '';
+
+        for (let y = startYear; y < startYear + 12; y++) {
+          const isSelected = selectedParts && y === selectedParts[0];
+          const isToday = y === today.getFullYear();
+
+          let classes = 'date-picker-day';
+          if (isSelected) classes += ' selected';
+          if (isToday) classes += ' today';
+
+          html += `<div class="${classes}" data-year="${y}">${y}</div>`;
+        }
+
+        daysGrid.innerHTML = html;
+        daysGrid.style.display = 'grid';
+        daysGrid.style.gridTemplateColumns = 'repeat(3, 1fr)';
+
+        // Add click handlers to years
+        document.querySelectorAll('.date-picker-day[data-year]').forEach(yearEl => {
+          yearEl.addEventListener('click', () => {
+            const selectedYear = parseInt(yearEl.dataset.year);
+            pickerCurrentDate.setFullYear(selectedYear);
+            pickerViewMode = 'months';
+            renderDatePicker(pickerCurrentDate);
+          });
+        });
+      }
     }
 
     // Reposition picker when sidebar is toggled
@@ -2254,7 +2374,8 @@
       if (dayData) {
         try {
           const parsed = JSON.parse(dayData);
-          cachedData.push(...(parsed.points || []));
+          const points = decompressPoints(parsed.data || parsed.points || '');
+          cachedData.push(...points);
         } catch (e) {
           logWarn(`Failed to parse cached day ${day}:`, e);
         }
@@ -2264,18 +2385,132 @@
     return cachedData;
   }
 
-  // Store daily data chunks to cache
+  // Convert Uint8Array to base64 string for localStorage storage
+  function uint8ArrayToBase64(bytes) {
+    let binary = '';
+    const len = bytes.byteLength;
+    for (let i = 0; i < len; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+  }
+
+  // Convert base64 string back to Uint8Array
+  function base64ToUint8Array(base64) {
+    const binary = atob(base64);
+    const len = binary.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes;
+  }
+
+  // Compress data using gzip compression
+  // Gzip efficiently handles repeated property names, so no need for array conversion
+  function compressPoints(points) {
+    if (!points || points.length === 0) return '';
+
+    const jsonStr = JSON.stringify(points);
+
+    // Check if pako is available for gzip compression
+    if (typeof window.pako !== 'undefined') {
+      try {
+        // Compress with gzip (highest compression level)
+        const compressed = window.pako.gzip(jsonStr, { level: 9 });
+        // Convert to base64 for localStorage storage
+        return uint8ArrayToBase64(compressed);
+      } catch (e) {
+        logWarn('Gzip compression failed, using uncompressed:', e);
+        return jsonStr;
+      }
+    }
+
+    // Fallback: just use the JSON string
+    return jsonStr;
+  }
+
+  // Decompress data back to point objects
+  function decompressPoints(compressed) {
+    if (!compressed) return [];
+
+    let jsonStr;
+
+    // Check if it's base64-encoded gzip data (no newlines, valid base64 chars)
+    // If it's compressed, it likely won't have spaces and will be base64
+    if (typeof window.pako !== 'undefined' && !compressed.includes(' ') && compressed.length > 50) {
+      try {
+        // Try to decompress as gzip
+        const compressedData = base64ToUint8Array(compressed);
+        const decompressed = window.pako.ungzip(compressedData, { to: 'string' });
+        jsonStr = decompressed;
+      } catch (e) {
+        // Not compressed data, use as-is
+        jsonStr = compressed;
+      }
+    } else {
+      // Plain JSON or legacy format
+      jsonStr = compressed;
+    }
+
+    const data = JSON.parse(jsonStr);
+
+    // Handle both new format (direct array) and legacy format (object with points array)
+    if (Array.isArray(data)) {
+      return data;
+    } else if (data.points && Array.isArray(data.points)) {
+      return data.points;
+    }
+
+    return [];
+  }
+
+  // Store daily data chunks to cache with compression and quota handling
   function cacheDailyData(user, device, dailyData) {
     Object.entries(dailyData).forEach(([day, points]) => {
       const dayKey = getDayCacheKey(user, device, day);
-      localStorage.setItem(dayKey, JSON.stringify({
-        points,
-        cachedAt: new Date().toISOString()
-      }));
+
+      try {
+        // Compress and store the data
+        const compressed = compressPoints(points);
+        localStorage.setItem(dayKey, JSON.stringify({
+          data: compressed,
+          cachedAt: new Date().toISOString()
+        }));
+        log(`Cached ${points.length} points for ${day}`);
+      } catch (quotaError) {
+        if (quotaError.name === 'QuotaExceededError') {
+          // Compression wasn't enough - data is too large
+          logWarn(`Storage quota exceeded for ${day} (${points.length} points). Skipping cache for this day.`);
+
+          // Show a warning to the user
+          const warningEl = document.getElementById('headerStatus');
+          if (warningEl) {
+            warningEl.textContent = `Warning: Some data too large to cache (${day})`;
+            setTimeout(() => {
+              if (warningEl.textContent.includes('too large to cache')) {
+                warningEl.textContent = '';
+              }
+            }, 5000);
+          }
+        } else {
+          throw quotaError;
+        }
+      }
     });
 
-    // Update index
-    updateCacheIndex(user, device, Object.keys(dailyData));
+    // Update index with only successfully cached days
+    const successfullyCached = [];
+    Object.entries(dailyData).forEach(([day, points]) => {
+      const dayKey = getDayCacheKey(user, device, day);
+      if (localStorage.getItem(dayKey)) {
+        successfullyCached.push(day);
+      }
+    });
+
+    if (successfullyCached.length > 0) {
+      updateCacheIndex(user, device, successfullyCached);
+    }
   }
 
   // Get date ranges for uncached days (for API calls)
@@ -2857,6 +3092,38 @@
     document.getElementById('statVisible').textContent = visibleInViewport.toLocaleString();
   }
 
+  // Calculate storage usage for localStorage
+  function calculateStorageUsage() {
+    let totalBytes = 0;
+    let cacheBytes = 0;
+    const baseKey = window.CONFIG.storage?.key ?? 'owntracks_cache';
+
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key) {
+        const value = localStorage.getItem(key);
+        const bytes = (key.length + value.length) * 2; // UTF-16 chars are 2 bytes
+        totalBytes += bytes;
+
+        // Count cache-related storage
+        if (key.startsWith(baseKey) || key === 'owntracks_settings') {
+          cacheBytes += bytes;
+        }
+      }
+    }
+
+    return { total: totalBytes, cache: cacheBytes };
+  }
+
+  // Format bytes as human-readable string
+  function formatBytes(bytes) {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return (bytes / Math.pow(k, i)).toFixed(1).replace('.0', '') + ' ' + sizes[i];
+  }
+
   function updateRefreshButton() {
     const storageEnabled = getSetting('storageEnabled', true);
     const user = document.getElementById('userSelect').value;
@@ -2898,16 +3165,19 @@
       document.getElementById('loadDataBtn').textContent = 'Load Data';
     }
 
-    // Update cache status text
+    // Update cache status text with storage usage
     const cacheStatusEl = document.getElementById('cacheStatus');
     if (storageEnabled && user && device) {
       cacheStatusEl.style.display = 'block';
       const totalCached = getCachedDays(user, device).size;
+      const usage = calculateStorageUsage();
       document.getElementById('cacheStatusText').textContent =
-        `Cache: ${totalCached} day${totalCached === 1 ? '' : 's'} stored for ${user}/${device}`;
+        `Cache: ${totalCached} day${totalCached === 1 ? '' : 's'} stored for ${user}/${device} (${formatBytes(usage.cache)} used)`;
     } else if (storageEnabled) {
       cacheStatusEl.style.display = 'block';
-      document.getElementById('cacheStatusText').textContent = 'Cache: enabled (no data cached yet)';
+      const usage = calculateStorageUsage();
+      document.getElementById('cacheStatusText').textContent =
+        `Cache: enabled (no data cached yet, ${formatBytes(usage.cache)} used)`;
     } else {
       cacheStatusEl.style.display = 'none';
     }

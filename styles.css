@@ -506,19 +506,51 @@ body:not(.ui-ready) .sub-section-content {
 .date-picker-nav {
   background: none;
   border: none;
-  font-size: 18px;
+  font-size: 20px;
   cursor: pointer;
-  padding: 4px 8px;
-  opacity: 0.7;
+  padding: 4px 10px;
+  border-radius: 4px;
+  transition: background-color 0.2s, opacity 0.2s;
+}
+
+.light-mode .date-picker-nav {
+  opacity: 0.6;
+  color: var(--text-light);
+}
+
+.dark-mode .date-picker-nav {
+  opacity: 1;
+  color: var(--text-dark);
 }
 
 .date-picker-nav:hover {
   opacity: 1;
 }
 
+.light-mode .date-picker-nav:hover {
+  background-color: rgba(0, 0, 0, 0.1);
+}
+
+.dark-mode .date-picker-nav:hover {
+  background-color: rgba(255, 255, 255, 0.15);
+}
+
 .date-picker-month-year {
   font-weight: 600;
   font-size: 14px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+  user-select: none;
+}
+
+.light-mode .date-picker-month-year:hover {
+  background-color: rgba(0, 0, 0, 0.08);
+}
+
+.dark-mode .date-picker-month-year:hover {
+  background-color: rgba(255, 255, 255, 0.12);
 }
 
 .date-picker-days-header {
