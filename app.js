@@ -332,9 +332,18 @@
     // Add tile layer
     updateTileLayer();
 
-    // Handle zoom events for dynamic rendering - DISABLED for performance
-    // Small datasets don't need redraw on zoom, points scale naturally
-    // state.map.on('zoomend', handleZoomChange);
+    // Handle zoom events for dynamic rendering
+    // Debounced redraw to avoid performance issues during continuous zooming
+    let zoomRedrawTimeout = null;
+    const handleZoomChange = () => {
+      clearTimeout(zoomRedrawTimeout);
+      zoomRedrawTimeout = setTimeout(() => {
+        if (state.data.filtered.length > 0) {
+          redrawMap();
+        }
+      }, 200); // 200ms delay after zoom stops
+    };
+    state.map.on('zoomend', handleZoomChange);
 
     // Initialize layer groups with proper z-index ordering
     // Order: Heatmap (bottom), Lines (middle), Points (top)
@@ -924,6 +933,10 @@
     // Save map position/zoom when user manually changes the map (only when auto-fit is disabled)
     state.map.on('moveend', saveMapPosition);
     state.map.on('zoomend', saveMapPosition);
+
+    // Update visible point count when viewport changes
+    state.map.on('moveend', updateViewportStats);
+    state.map.on('zoomend', updateViewportStats);
 
     // Apply saved settings to UI
     applySettingsToUI();
@@ -2386,19 +2399,26 @@
     if (dynamicVisibilityEnabled && totalPoints > 2000) {
       // Calculate sample rate based on both zoom and total points
       // Higher zoom = more detail, Lower zoom = more aggressive sampling
-      const zoomFactor = Math.max(0.1, (zoom - 2) / 14); // 0.1 to 1.0 based on zoom
+      const zoomFactor = Math.max(0.05, (zoom - 2) / 14); // 0.05 to 1.0 based on zoom
       const densityFactor = Math.max(0.1, targetPoints / totalPoints); // Reduce if many points
 
-      // Combine factors: more sampling when zoomed out OR when there are many points
-      const combinedFactor = Math.min(zoomFactor, densityFactor);
+      // Combine factors: multiply so zoom level still matters for large datasets
+      // This allows showing progressively more points as you zoom in
+      const combinedFactor = zoomFactor * densityFactor;
 
-      if (combinedFactor < 0.2) {
-        pointSampleRate = Math.max(10, Math.ceil(1 / combinedFactor));
-      } else if (combinedFactor < 0.5) {
-        pointSampleRate = Math.max(5, Math.ceil(1 / combinedFactor));
-      } else if (combinedFactor < 0.8) {
-        pointSampleRate = Math.max(2, Math.ceil(1 / combinedFactor));
+      // Calculate sample rate with logarithmic scaling for smoother transitions
+      // Much smaller thresholds now since we're multiplying factors
+      if (combinedFactor < 0.01) {
+        // Very zoomed out: aggressive sampling (1/20 to 1/50 of points)
+        pointSampleRate = Math.max(10, Math.min(50, Math.ceil(100 * combinedFactor / 2)));
+      } else if (combinedFactor < 0.05) {
+        // Zoomed out: moderate sampling
+        pointSampleRate = Math.max(5, Math.min(20, Math.ceil(1 / combinedFactor / 2)));
+      } else if (combinedFactor < 0.15) {
+        // Mid zoom: light sampling
+        pointSampleRate = Math.max(2, Math.min(10, Math.ceil(1 / combinedFactor / 3)));
       } else {
+        // Zoomed in: show all points
         pointSampleRate = 1;
       }
 
@@ -2527,8 +2547,25 @@
       }).addTo(state.map);
     }
 
-    // Update visible count
-    document.getElementById('statVisible').textContent = sampledForPoints.length.toLocaleString();
+    // Update visible count - only points in viewport
+    const visibleInViewport = countPointsInViewport(sampledForPoints);
+    document.getElementById('statVisible').textContent = visibleInViewport.toLocaleString();
+  }
+
+  // Count points that are currently visible in the map viewport
+  function countPointsInViewport(points) {
+    if (!state.map || points.length === 0) return 0;
+
+    const bounds = state.map.getBounds();
+    let count = 0;
+
+    for (const point of points) {
+      if (bounds.contains([point.lat, point.lon])) {
+        count++;
+      }
+    }
+
+    return count;
   }
 
   function createPointMarker(lat, lng, options) {
@@ -2675,16 +2712,16 @@
     let pointSampleRate = 1;
     if (dynamicVisibilityEnabled && totalPoints > 2000) {
       const targetPoints = 3000;
-      const zoomFactor = Math.max(0.1, (zoom - 2) / 14);
+      const zoomFactor = Math.max(0.05, (zoom - 2) / 14);
       const densityFactor = Math.max(0.1, targetPoints / totalPoints);
-      const combinedFactor = Math.min(zoomFactor, densityFactor);
+      const combinedFactor = zoomFactor * densityFactor;
 
-      if (combinedFactor < 0.2) {
-        pointSampleRate = Math.max(10, Math.ceil(1 / combinedFactor));
-      } else if (combinedFactor < 0.5) {
-        pointSampleRate = Math.max(5, Math.ceil(1 / combinedFactor));
-      } else if (combinedFactor < 0.8) {
-        pointSampleRate = Math.max(2, Math.ceil(1 / combinedFactor));
+      if (combinedFactor < 0.01) {
+        pointSampleRate = Math.max(10, Math.min(50, Math.ceil(100 * combinedFactor / 2)));
+      } else if (combinedFactor < 0.05) {
+        pointSampleRate = Math.max(5, Math.min(20, Math.ceil(1 / combinedFactor / 2)));
+      } else if (combinedFactor < 0.15) {
+        pointSampleRate = Math.max(2, Math.min(10, Math.ceil(1 / combinedFactor / 3)));
       }
     }
 
@@ -2776,7 +2813,7 @@
     const sourceSuffix = cached || fresh ? ` (${cached.toLocaleString()} cached, ${fresh.toLocaleString()} fresh)` : '';
 
     document.getElementById('statTotal').textContent = `${totalPoints.toLocaleString()}${sourceSuffix}`;
-    document.getElementById('statVisible').textContent = state.data.filtered.length.toLocaleString();
+    // Visible count is updated by redrawMap() and updateViewportStats() which account for viewport
     document.getElementById('statMaxAccuracy').textContent = state.data.maxAccuracy + ' m';
 
     if (state.data.timeRange.start && state.data.timeRange.end) {
@@ -2786,6 +2823,38 @@
     } else {
       document.getElementById('statTimeRange').textContent = '-';
     }
+  }
+
+  // Update the visible point count based on current viewport
+  // Called on map move/zoom events without redrawing the entire map
+  function updateViewportStats() {
+    if (state.data.filtered.length === 0) return;
+
+    // Get the current sample rate that would be used (matching redrawMap logic)
+    const totalPoints = state.data.filtered.length;
+    const zoom = state.map.getZoom();
+    const dynamicVisibilityEnabled = getSetting('dynamicPointVisibility', true);
+
+    let pointSampleRate = 1;
+    if (dynamicVisibilityEnabled && totalPoints > 2000) {
+      const targetPoints = 3000;
+      const zoomFactor = Math.max(0.05, (zoom - 2) / 14);
+      const densityFactor = Math.max(0.1, targetPoints / totalPoints);
+      const combinedFactor = zoomFactor * densityFactor;
+
+      if (combinedFactor < 0.01) {
+        pointSampleRate = Math.max(10, Math.min(50, Math.ceil(100 * combinedFactor / 2)));
+      } else if (combinedFactor < 0.05) {
+        pointSampleRate = Math.max(5, Math.min(20, Math.ceil(1 / combinedFactor / 2)));
+      } else if (combinedFactor < 0.15) {
+        pointSampleRate = Math.max(2, Math.min(10, Math.ceil(1 / combinedFactor / 3)));
+      }
+    }
+
+    // Get sampled points and count those in viewport
+    const sampledPoints = state.data.filtered.filter((_, i) => i % pointSampleRate === 0);
+    const visibleInViewport = countPointsInViewport(sampledPoints);
+    document.getElementById('statVisible').textContent = visibleInViewport.toLocaleString();
   }
 
   function updateRefreshButton() {
