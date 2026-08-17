@@ -159,6 +159,8 @@
 
   function getDefaultSetting(key) {
     const defaults = {
+      showPoints: true,
+      showLines: true,
       pointSize: 2,
       pointColor: '#3388ff',
       pointOpacity: 0.5,
@@ -361,7 +363,7 @@
     const tileLayer = L.tileLayer(tileUrl, {
       minZoom: getMapSetting('minZoom'),
       maxZoom: getMapSetting('maxZoom'),
-      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, © CARTO',
+      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, © CARTO | Powered by <a href="https://leafletjs.com/">Leaflet</a>',
       crossOrigin: true
     });
 
@@ -407,11 +409,17 @@
       // If enabled and data exists, fit immediately
       if (e.target.checked && state.data.filtered.length > 0) {
         fitMapToBounds();
+      } else if (!e.target.checked) {
+        // When disabling, save current position for restoration
+        saveMapPosition();
       }
     });
 
     // Display options
-    document.getElementById('showPoints').addEventListener('change', redrawMap);
+    document.getElementById('showPoints').addEventListener('change', (e) => {
+      saveSetting('showPoints', e.target.checked, true);
+      redrawMap();
+    });
     document.getElementById('pointColor').addEventListener('change', (e) => {
       document.getElementById('pointColorPicker').value = e.target.value;
       saveSetting('pointColor', e.target.value, '#3388ff');
@@ -431,7 +439,10 @@
       redrawMap();
     });
 
-    document.getElementById('showLines').addEventListener('change', () => { redrawMap(); });
+    document.getElementById('showLines').addEventListener('change', (e) => {
+      saveSetting('showLines', e.target.checked, true);
+      redrawMap();
+    });
     document.getElementById('lineColor').addEventListener('change', (e) => {
       document.getElementById('lineColorPicker').value = e.target.value;
       saveSetting('lineColor', e.target.value, '#3388ff');
@@ -588,6 +599,9 @@
       // If enabled and data exists, fit immediately
       if (e.target.checked && state.data.filtered.length > 0) {
         fitMapToBounds();
+      } else if (!e.target.checked) {
+        // When disabling, save current position for restoration
+        saveMapPosition();
       }
     });
 
@@ -695,12 +709,20 @@
       saveSetting('consoleLoggingEnabled', e.target.checked, true);
     });
 
+    // Save map position/zoom when user manually changes the map (only when auto-fit is disabled)
+    state.map.on('moveend', saveMapPosition);
+    state.map.on('zoomend', saveMapPosition);
+
     // Apply saved settings to UI
     applySettingsToUI();
   }
 
   function applySettingsToUI() {
-    // Display options
+    // Display options - visibility toggles
+    document.getElementById('showPoints').checked = getSetting('showPoints', true);
+    document.getElementById('showLines').checked = getSetting('showLines', true);
+
+    // Display options - colors and sizes
     if (getSetting('pointColor', '#3388ff') !== '#3388ff') {
       document.getElementById('pointColor').value = getSetting('pointColor', '#3388ff');
       document.getElementById('pointColorPicker').value = getSetting('pointColor', '#3388ff');
@@ -808,6 +830,36 @@
     sidebar.classList.add('transitions-enabled');
     sidebar.classList.toggle('open', state.sidebarOpen);
     saveSetting('sidebarOpen', state.sidebarOpen, false);
+
+    // If auto-fit is enabled and we have data loaded, re-fit bounds to account for sidebar
+    // Delay slightly to allow sidebar transition to start
+    if (getSetting('autoFitToBounds', true) && state.data.filtered.length > 0) {
+      setTimeout(() => {
+        fitMapToBounds();
+      }, 50);
+    }
+  }
+
+  function saveMapPosition() {
+    // Only save if auto-fit is disabled (user wants manual control)
+    if (getSetting('autoFitToBounds', true)) {
+      return;
+    }
+
+    const center = state.map.getCenter();
+    const zoom = state.map.getZoom();
+
+    saveSetting('mapCenter', { lat: center.lat, lng: center.lng }, null);
+    saveSetting('mapZoom', zoom, null);
+  }
+
+  function restoreMapPosition() {
+    const savedCenter = getSetting('mapCenter', null);
+    const savedZoom = getSetting('mapZoom', null);
+
+    if (savedCenter && savedZoom !== null) {
+      state.map.setView([savedCenter.lat, savedCenter.lng], savedZoom);
+    }
   }
 
   function restoreSidebarState() {
@@ -1793,9 +1845,11 @@
 
       hideLoading();
 
-      // Fit map to data bounds if setting is enabled
+      // Fit map to data bounds if setting is enabled, otherwise restore saved position
       if (getSetting('autoFitToBounds', true) && state.data.filtered.length > 0) {
         fitMapToBounds();
+      } else {
+        restoreMapPosition();
       }
 
       // Update data source indicator
@@ -2061,8 +2115,8 @@
       state.layers.heatmap = null;
     }
 
-    const showPoints = document.getElementById('showPoints').checked;
-    const showLines = document.getElementById('showLines').checked;
+    const showPoints = getSetting('showPoints', true);
+    const showLines = getSetting('showLines', true);
     const heatmapEnabled = getSetting('heatmapEnabled', false);
     const altitudeEnabled = getSetting('altitudeEnabled', false);
     const altitudeLinesEnabled = getSetting('altitudeLinesEnabled', false);
@@ -2351,7 +2405,21 @@
       state.data.filtered.map(p => [p.lat, p.lon])
     );
 
-    state.map.fitBounds(bounds, { padding: [50, 50] });
+    // Adjust padding based on sidebar state
+    // When sidebar is open, add left padding equal to sidebar width to keep data visible
+    const sidebar = document.getElementById('sidebar');
+    const sidebarOpen = sidebar && state.sidebarOpen;
+    const basePadding = 40;
+
+    let leftPadding = basePadding;
+    if (sidebarOpen && sidebar) {
+      leftPadding = sidebar.offsetWidth + 20; // Full sidebar width plus small buffer
+    }
+
+    state.map.fitBounds(bounds, {
+      paddingTopLeft: [leftPadding, basePadding],
+      paddingBottomRight: [basePadding, basePadding]
+    });
   }
 
   // Proximity click handler - makes it easier to click on small points
