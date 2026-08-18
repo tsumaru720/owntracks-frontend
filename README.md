@@ -81,6 +81,8 @@ Configuration can be provided via:
 
 SWS Environment variables are also supported - see [https://static-web-server.net](https://static-web-server.net/)
 
+It is recommended to view this document directly as the table is too wide for the repo page - [See README.md](./README.md)
+
 | Environment Variable | JSON Path | Description | Required | Default |
 |---------------------|-----------|-------------|----------|---------|
 | `APP_API_URL` | `api.url` | OwnTracks recorder API base URL | ✅ Yes | — |
