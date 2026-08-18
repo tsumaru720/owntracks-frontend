@@ -2762,14 +2762,7 @@
   function compressPoints(points) {
     if (!points || points.length === 0) return new Uint8Array(0);
 
-    // Round coordinates to 5 decimal places (~1 meter precision) to reduce storage size
-    const optimized = points.map(p => ({
-      ...p,
-      lat: Math.round(p.lat * 100000) / 100000,
-      lon: Math.round(p.lon * 100000) / 100000
-    }));
-
-    const jsonStr = JSON.stringify(optimized);
+    const jsonStr = JSON.stringify(points);
 
     // Check if pako is available for gzip compression
     if (typeof window.pako !== 'undefined') {
