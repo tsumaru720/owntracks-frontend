@@ -66,6 +66,8 @@ Configuration can be provided via:
 
 **Note**: A lot of the settings here can be configured in the app's settings popout
 
+SWS Environment variables are also supported - see [https://static-web-server.net](https://static-web-server.net/)
+
 | Environment Variable | JSON Path | Description | Required | Default |
 |---------------------|-----------|-------------|----------|---------|
 | `APP_API_URL` | `api.url` | OwnTracks recorder API base URL | ✅ Yes | — |
@@ -214,3 +216,4 @@ Requires ES6, localStorage, Fetch API, CSS Grid/Flexbox. Tested on Chrome, Firef
 - [CARTO](https://carto.com/) - Map tiles
 - [Leaflet.heat](https://github.com/Leaflet/Leaflet.heat) - Heatmap
 - [OwnTracks](https://owntracks.org/) - Location tracking platform
+- [static-web-server](https://github.com/static-web-server/static-web-server) - Static Web Server
