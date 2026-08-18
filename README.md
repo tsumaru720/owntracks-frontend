@@ -8,21 +8,34 @@ A browser-based visualization tool for OwnTracks location data. Handles large da
 
 ## Quick Start
 
+### Option A: Standalone (config.json)
+
 1. Copy the configuration template:
    ```bash
-   cp config.js.example config.js
+   cp config.json.example config.json
    ```
 
-2. Edit `config.js` and set your API URL:
-   ```javascript
-   window.CONFIG = {
-     api: {
-       url: "https://owntracks.example.org"
+2. Edit `config.json` and set your API URL:
+   ```json
+   {
+     "api": {
+       "url": "https://owntracks.example.org"
      }
    }
    ```
 
 3. Open `index.html` in a web browser.
+
+### Option B: Docker (environment variables)
+
+```bash
+docker run -d \
+  -e APP_API_URL="https://owntracks.example.org" \
+  -p 8080:80 \
+  owntracks-frontend
+```
+
+**Note**: For Docker, the `entrypoint.sh` script collects `APP_*` environment variables and writes them to `environment.json`. You can also provide a `config.json` file to override environment variables.
 
 ## Features
 
@@ -43,122 +56,101 @@ A browser-based visualization tool for OwnTracks location data. Handles large da
 
 ## Configuration
 
-All settings go in `config.js`. Copy from `config.js.example` and customize.
+Configuration can be provided via:
+1. **Docker**: Set `APP_*` environment variables (entrypoint.sh generates `environment.json`)
+2. **Standalone**: Create `config.json` file
+3. **Both**: `config.json` overrides environment variables
 
-### Required
+### Configuration Reference
 
-| Setting | Description |
-|---------|-------------|
-| `api.url` | OwnTracks recorder API base URL |
+| Environment Variable | JSON Path | Description | Required | Default |
+|---------------------|-----------|-------------|----------|---------|
+| `APP_API_URL` | `api.url` | OwnTracks recorder API base URL | ✅ Yes | — |
+| `APP_API_USERNAME` | `api.username` | Basic auth username | No | — |
+| `APP_API_PASSWORD` | `api.password` | Basic auth password | No | — |
+| `APP_API_COOKIENAME` | `api.cookieName` | Cookie auth name | No | — |
+| `APP_API_COOKIEVALUE` | `api.cookieValue` | Cookie auth value | No | — |
+| `APP_API_TIMEOUT` | `api.timeout` | Request timeout (milliseconds) | No | `600000` |
+| `APP_STORAGE_KEY` | `storage.key` | localStorage key prefix for caching | No | `owntracks_cache` |
+| `APP_MAP_TILESERVER` | `map.tileServer` | Map tile server URL template | No | CARTO voyager |
+| `APP_MAP_DEFAULTCENTER` | `map.defaultCenter` | Default map center as `[lat, lng]` | No | `[51.50138, -0.14189]` |
+| `APP_MAP_DEFAULTZOOM` | `map.defaultZoom` | Default map zoom level | No | `13` |
+| `APP_MAP_MINZOOM` | `map.minZoom` | Minimum zoom level | No | `2` |
+| `APP_MAP_MAXZOOM` | `map.maxZoom` | Maximum zoom level | No | `19` |
+| `APP_DEFAULTS_USER` | `defaults.user` | Default username to select | No | — |
+| `APP_DEFAULTS_DEVICE` | `defaults.device` | Default device to select | No | — |
+| `APP_DEFAULTS_TIMEPERIOD` | `defaults.timePeriod` | Default time period | No | `30days` |
+| `APP_DISPLAY_POINTS_SHOW` | `display.points.show` | Show points by default | No | `true` |
+| `APP_DISPLAY_POINTS_COLOR` | `display.points.color` | Default point color | No | `#3388ff` |
+| `APP_DISPLAY_POINTS_SIZE` | `display.points.size` | Default point size | No | `2` |
+| `APP_DISPLAY_POINTS_OPACITY` | `display.points.opacity` | Default point opacity | No | `0.5` |
+| `APP_DISPLAY_LINES_SHOW` | `display.lines.show` | Show lines by default | No | `true` |
+| `APP_DISPLAY_LINES_COLOR` | `display.lines.color` | Default line color | No | `#3388ff` |
+| `APP_DISPLAY_LINES_WIDTH` | `display.lines.width` | Default line width | No | `3` |
+| `APP_DISPLAY_LINES_OPACITY` | `display.lines.opacity` | Default line opacity | No | `0.7` |
+| `APP_DISPLAY_LINES_SMOOTH` | `display.lines.smooth` | Smooth lines by default | No | `false` |
+| `APP_DISPLAY_ACCURACY_MAXMETERS` | `display.accuracy.maxMeters` | Max GPS accuracy filter (0 = all) | No | `0` |
+| `APP_DISPLAY_ALTITUDE_MIN` | `display.altitude.min` | Min altitude for gradient | No | `0` |
+| `APP_DISPLAY_ALTITUDE_MAX` | `display.altitude.max` | Max altitude for gradient | No | `1000` |
+| `APP_DISPLAY_ALTITUDE_POINTS_ENABLED` | `display.altitude.points.enabled` | Enable altitude gradient on points | No | `false` |
+| `APP_DISPLAY_ALTITUDE_POINTS_LOWCOLOR` | `display.altitude.points.lowColor` | Low altitude color (points) | No | `#00ff00` |
+| `APP_DISPLAY_ALTITUDE_POINTS_HIGHCOLOR` | `display.altitude.points.highColor` | High altitude color (points) | No | `#ff0000` |
+| `APP_DISPLAY_ALTITUDE_LINES_ENABLED` | `display.altitude.lines.enabled` | Enable altitude gradient on lines | No | `false` |
+| `APP_DISPLAY_ALTITUDE_LINES_LOWCOLOR` | `display.altitude.lines.lowColor` | Low altitude color (lines) | No | `#00ff00` |
+| `APP_DISPLAY_ALTITUDE_LINES_HIGHCOLOR` | `display.altitude.lines.highColor` | High altitude color (lines) | No | `#ff0000` |
+| `APP_DISPLAY_HEATMAP_ENABLED` | `display.heatmap.enabled` | Enable heatmap by default | No | `false` |
+| `APP_DISPLAY_HEATMAP_RADIUS` | `display.heatmap.radius` | Heatmap radius | No | `25` |
+| `APP_DISPLAY_HEATMAP_BLUR` | `display.heatmap.blur` | Heatmap blur | No | `15` |
+| `APP_DISPLAY_HEATMAP_MINOPACITY` | `display.heatmap.minOpacity` | Heatmap min opacity | No | `0.05` |
+| `APP_DISPLAY_HEATMAP_MAXZOOM` | `display.heatmap.maxZoom` | Max zoom for heatmap | No | `18` |
+| `APP_DISPLAY_HEATMAP_GRADIENT_LOWCOLOR` | `display.heatmap.gradient.lowColor` | Heatmap low color | No | `#0000ff` |
+| `APP_DISPLAY_HEATMAP_GRADIENT_MIDCOLOR` | `display.heatmap.gradient.midColor` | Heatmap mid color | No | `#00ffff` |
+| `APP_DISPLAY_HEATMAP_GRADIENT_HIGHCOLOR` | `display.heatmap.gradient.highColor` | Heatmap high color | No | `#ff0000` |
+| `APP_DISPLAY_STORAGEENABLED` | `display.storageEnabled` | Cache data in browser | No | `true` |
+| `APP_PERFORMANCE_DYNAMICPOINTVISIBILITY` | `performance.dynamicPointVisibility` | Auto-adjust point density | No | `true` |
+| `APP_DEBUG_CONSOLELOGGING` | `debug.consoleLogging` | Enable console logging | No | `true` |
 
-### Optional API Settings
+### Authentication Rules
 
-| Setting | Description | Default |
-|---------|-------------|---------|
-| `api.username` | Basic auth username | — |
-| `api.password` | Basic auth password (required if username set) | — |
-| `api.cookieName` | Cookie auth name | — |
-| `api.cookieValue` | Cookie value (required if cookieName set) | — |
-| `api.timeout` | Request timeout (ms) | `600000` (10 min) |
+- **No auth**: Omit all auth settings
+- **Basic auth**: Set both `username` and `password`
+- **Cookie auth**: Set both `cookieName` and `cookieValue`
+- **Both**: You can use basic auth AND cookie auth together
 
-**Authentication rules**: Use basic auth, cookie auth, both, or neither. If using basic auth, both username and password are required. If using cookie auth, both cookieName and cookieValue are required.
+### Example config.json
 
-### Optional Map Settings
-
-```javascript
-map: {
-  tileServer: "https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
-  defaultCenter: [51.50138, -0.14189],  // London
-  defaultZoom: 13,
-  minZoom: 2,
-  maxZoom: 19
+```json
+{
+  "api": {
+    "url": "https://recorder.example.org",
+    "username": "user",
+    "password": "pass"
+  },
+  "map": {
+    "defaultCenter": [51.50138, -0.14189],
+    "defaultZoom": 13
+  },
+  "defaults": {
+    "user": "john",
+    "timePeriod": "7days"
+  }
 }
 ```
 
-### Optional Defaults
+### Example Docker Compose
 
-```javascript
-defaults: {
-  user: "",           // Default username
-  device: "",         // Default device name
-  timePeriod: "30days" // Default time selection
-}
-```
-
-### Optional Storage Settings
-
-```javascript
-storage: {
-  key: "owntracks_cache"  // localStorage key prefix
-}
-```
-
-### Optional Display Defaults
-
-All display options can be set in config.js and overridden in the UI. Changes persist to localStorage automatically.
-
-```javascript
-display: {
-  points: {
-    show: true,
-    color: "#3388ff",
-    size: 2,
-    opacity: 0.5
-  },
-  lines: {
-    show: true,
-    color: "#3388ff",
-    width: 3,
-    opacity: 0.7,
-    smooth: false
-  },
-  accuracy: {
-    maxMeters: 0  // 0 = show all points
-  },
-  altitude: {
-    min: 0,
-    max: 1000,
-    points: {
-      enabled: false,
-      lowColor: "#00ff00",
-      highColor: "#ff0000"
-    },
-    lines: {
-      enabled: false,
-      lowColor: "#00ff00",
-      highColor: "#ff0000"
-    }
-  },
-  heatmap: {
-    enabled: false,
-    radius: 25,
-    blur: 15,
-    minOpacity: 0.05,
-    maxZoom: 18,
-    gradient: {
-      lowColor: "#0000ff",
-      midColor: "#00ffff",
-      highColor: "#ff0000"
-    }
-  },
-  storageEnabled: true  // Cache location data in browser
-}
-```
-
-### Optional Performance Settings
-
-```javascript
-performance: {
-  dynamicPointVisibility: true  // Auto-adjust point density based on zoom
-}
-```
-
-### Optional Debug Settings
-
-```javascript
-debug: {
-  consoleLogging: true  // Enable console.log output
-}
+```yaml
+services:
+  owntracks-frontend:
+    image: owntracks-frontend
+    environment:
+      - APP_API_URL=https://recorder.example.org
+      - APP_API_USERNAME=user
+      - APP_API_PASSWORD=pass
+      - APP_DEFAULTS_USER=john
+      - APP_DEFAULTS_TIMEPERIOD=7days
+    ports:
+      - "8080:80"
 ```
 
 ## Display Options
