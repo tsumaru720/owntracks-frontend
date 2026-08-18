@@ -1,0 +1,76 @@
+{
+  "api": {
+    "url": "https://recorder.example.org",
+    "username": "",
+    "password": "",
+    "cookieName": "",
+    "cookieValue": "",
+    "timeout": 600000
+  },
+  "map": {
+    "tileServer": "https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+    "defaultCenter": [51.50138, -0.14189],
+    "defaultZoom": 13,
+    "minZoom": 2,
+    "maxZoom": 21
+  },
+  "defaults": {
+    "user": "owntracks-user",
+    "device": "users-device",
+    "timePeriod": "30days"
+  },
+  "storage": {
+    "key": "owntracks_cache"
+  },
+  "display": {
+    "points": {
+      "show": true,
+      "color": "#3388ff",
+      "size": 2,
+      "opacity": 0.5
+    },
+    "lines": {
+      "show": true,
+      "color": "#3388ff",
+      "width": 3,
+      "opacity": 0.7,
+      "smooth": false
+    },
+    "accuracy": {
+      "maxMeters": 0
+    },
+    "altitude": {
+      "min": 0,
+      "max": 1000,
+      "points": {
+        "enabled": false,
+        "lowColor": "#00ff00",
+        "highColor": "#ff0000"
+      },
+      "lines": {
+        "enabled": false,
+        "lowColor": "#00ff00",
+        "highColor": "#ff0000"
+      }
+    },
+    "heatmap": {
+      "enabled": false,
+      "radius": 25,
+      "blur": 15,
+      "minOpacity": 0.05,
+      "maxZoom": 18,
+      "gradient": {
+        "lowColor": "#0000ff",
+        "midColor": "#00ffff",
+        "highColor": "#ff0000"
+      }
+    },
+    "storageEnabled": true
+  },
+  "performance": {
+    "dynamicPointVisibility": true
+  },
+  "debug": {
+    "consoleLogging": true
+  }
+}
