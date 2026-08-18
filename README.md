@@ -14,10 +14,23 @@ A browser-based visualization tool for OwnTracks location data. Handles large da
 docker run -d \
   -e APP_API_URL="https://owntracks.example.org" \
   -p 8080:80 \
-  owntracks-frontend
+  ghcr.io/tsumaru720/owntracks-frontend:latest
 ```
 
-**Note**: This method generates an `environment.json` file that will be placed in the document root. You can also provide a `config.json` file to override environment variables via bind mounts.
+Or with Docker Compose:
+
+```yaml
+services:
+  owntracks-frontend:
+    image: ghcr.io/tsumaru720/owntracks-frontend:latest
+    environment:
+      APP_API_URL: https://owntracks.example.org
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+```
+
+**Note**: This method generates an `environment.json` file that will be placed in the document root. You can also provide a `config.json` file to override environment variables via bind mounts. See below detailed docker compose example if you wish to include config.json in your container. Note that config.json values will have priority over environment variables.
 
 ### Option B: Standalone (config.json)
 
@@ -150,18 +163,24 @@ SWS Environment variables are also supported - see [https://static-web-server.ne
 ```yaml
 services:
   owntracks-frontend:
-    image: owntracks-frontend
+    image: ghcr.io/tsumaru720/owntracks-frontend:latest
     environment:
-      - APP_API_URL=https://recorder.example.org
-      - APP_API_USERNAME=user
-      - APP_API_PASSWORD=pass
-      - APP_MAP_DEFAULTCENTER=[51.50138,-0.14189]
-      - APP_MAP_DEFAULTZOOM=13
-      - APP_DEFAULTS_USER=john
-      - APP_DEFAULTS_TIMEPERIOD=7days
-      - APP_DEBUG_CONSOLELOGGING=false
+      APP_API_URL: https://recorder.example.org
+      APP_API_USERNAME: user
+      APP_API_PASSWORD: pass
+      APP_MAP_DEFAULTCENTER: "[51.50138,-0.14189]"
+      APP_MAP_DEFAULTZOOM: "13"
+      APP_DEFAULTS_USER: john
+      APP_DEFAULTS_TIMEPERIOD: 7days
+      APP_DEBUG_CONSOLELOGGING: "false"
+      SERVER_LOG_LEVEL: "info"
+      SERVER_LOG_FORMAT: "pretty"
+      SERVER_LOG_WITH_ANSI: "true"
     ports:
       - "8080:80"
+    volumes:
+      - ./config.json:/home/web/public/config.json:ro
+    restart: unless-stopped
 ```
 
 ## Display Options
