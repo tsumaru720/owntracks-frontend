@@ -76,7 +76,7 @@ Configuration can be provided via:
 | `APP_MAP_DEFAULTCENTER` | `map.defaultCenter` | Default map center as `[lat, lng]` | No | `[51.50138, -0.14189]` |
 | `APP_MAP_DEFAULTZOOM` | `map.defaultZoom` | Default map zoom level | No | `13` |
 | `APP_MAP_MINZOOM` | `map.minZoom` | Minimum zoom level | No | `2` |
-| `APP_MAP_MAXZOOM` | `map.maxZoom` | Maximum zoom level | No | `19` |
+| `APP_MAP_MAXZOOM` | `map.maxZoom` | Maximum zoom level | No | `21` |
 | `APP_DEFAULTS_USER` | `defaults.user` | Default username to select | No | — |
 | `APP_DEFAULTS_DEVICE` | `defaults.device` | Default device to select | No | — |
 | `APP_DEFAULTS_TIMEPERIOD` | `defaults.timePeriod` | Default time period | No | `30days` |
