@@ -3,6 +3,11 @@
 # Path where environment.json will be written
 CONFIG_DIR="/home/web/public"
 
+# Set defaults for SWS
+: "${SERVER_LOG_LEVEL:="info"}"
+: "${SERVER_LOG_FORMAT:="pretty"}"
+: "${SERVER_LOG_WITH_ANSI:="true"}"
+
 # Collect APP_* environment variables and write them to environment.json
 # This allows Docker deployments to configure via environment variables
 # The JSON format matches config.json, so config.json will override these values
