@@ -61,6 +61,76 @@
   // Configuration & Initialization
   // ============================================================================
 
+  /**
+   * Load environment.json and merge with existing CONFIG from config.js
+   * This allows loading configuration from environment variables while
+   * maintaining backwards compatibility with config.js
+   */
+  async function loadEnvironmentConfig() {
+    try {
+      const response = await fetch('environment.json');
+      if (!response.ok) {
+        // environment.json doesn't exist - this is fine, fall back to config.js
+        return;
+      }
+      const envConfig = await response.json();
+
+      // Initialize window.CONFIG if it doesn't exist (from config.js)
+      if (typeof window.CONFIG === 'undefined') {
+        window.CONFIG = {};
+      }
+
+      // Initialize api object if it doesn't exist
+      if (!window.CONFIG.api) {
+        window.CONFIG.api = {};
+      }
+
+      // Map environment variables to CONFIG structure
+      // API_URL -> api.url
+      if (envConfig.API_URL !== undefined) {
+        window.CONFIG.api.url = envConfig.API_URL;
+      }
+
+      // API_USERNAME -> api.username
+      if (envConfig.API_USERNAME !== undefined) {
+        window.CONFIG.api.username = envConfig.API_USERNAME;
+      }
+
+      // API_PASSWORD -> api.password
+      if (envConfig.API_PASSWORD !== undefined) {
+        window.CONFIG.api.password = envConfig.API_PASSWORD;
+      }
+
+      // API_AUTH_COOKIE -> api.cookieName
+      if (envConfig.API_AUTH_COOKIE !== undefined) {
+        window.CONFIG.api.cookieName = envConfig.API_AUTH_COOKIE;
+      }
+
+      // API_AUTH_COOKIE_VALUE -> api.cookieValue
+      if (envConfig.API_AUTH_COOKIE_VALUE !== undefined) {
+        window.CONFIG.api.cookieValue = envConfig.API_AUTH_COOKIE_VALUE;
+      }
+
+      // Map other environment variables to their respective config paths
+      if (envConfig.API_TIMEOUT !== undefined) {
+        window.CONFIG.api.timeout = envConfig.API_TIMEOUT;
+      }
+
+      // Map storage configuration
+      if (envConfig.STORAGE_KEY !== undefined) {
+        if (!window.CONFIG.storage) {
+          window.CONFIG.storage = {};
+        }
+        window.CONFIG.storage.key = envConfig.STORAGE_KEY;
+      }
+
+      log('Loaded configuration from environment.json');
+    } catch (error) {
+      // Failed to load environment.json - this is fine, fall back to config.js
+      log('Could not load environment.json, using config.js:', error.message);
+    }
+  }
+
   function validateAuthConfig() {
     const api = window.CONFIG.api || {};
 
@@ -87,9 +157,18 @@
   }
 
   async function init() {
-    // Check if config is loaded
+    // Try to load environment.json first (before checking CONFIG)
+    await loadEnvironmentConfig();
+
+    // Check if config is loaded (from either environment.json or config.js)
     if (typeof window.CONFIG === 'undefined') {
       showError('Configuration not loaded. Please copy config.js.example to config.js and add your credentials.');
+      return;
+    }
+
+    // Check if API URL is set (required)
+    if (!window.CONFIG.api || !window.CONFIG.api.url) {
+      showError('Configuration error: API URL is required. Set API_URL in environment.json or api.url in config.js');
       return;
     }
 
