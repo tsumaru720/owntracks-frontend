@@ -4,9 +4,9 @@
 CONFIG_DIR="/home/web/public"
 
 # Set defaults for SWS
-: "${SERVER_LOG_LEVEL:="info"}"
-: "${SERVER_LOG_FORMAT:="pretty"}"
-: "${SERVER_LOG_WITH_ANSI:="true"}"
+export SERVER_LOG_LEVEL="${SERVER_LOG_LEVEL:-info}"
+export SERVER_LOG_FORMAT="${SERVER_LOG_FORMAT:-pretty}"
+export SERVER_LOG_WITH_ANSI="${SERVER_LOG_WITH_ANSI:-true}"
 
 # Collect APP_* environment variables and write them to environment.json
 # This allows Docker deployments to configure via environment variables
