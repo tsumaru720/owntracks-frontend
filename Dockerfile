@@ -27,7 +27,7 @@ RUN mkdir -p /home/web/public && chown web:web /home/web/public
 USER web
 
 # Copy application files (directory already owned by web)
-COPY app.js index.html /home/web/public/
+COPY app.js index.html styles.css /home/web/public/
 
 # Set the entrypoint
 ENTRYPOINT ["/entrypoint.sh"]
