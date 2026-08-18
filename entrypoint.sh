@@ -1,5 +1,8 @@
 #!/bin/sh
 
+# Path where environment.json will be written
+CONFIG_DIR="/home/web/public"
+
 # Collect APP_* environment variables and write them to environment.json
 # This allows Docker deployments to configure via environment variables
 # The JSON format matches config.json, so config.json will override these values
@@ -78,12 +81,12 @@ jq -n '
       .
     end
   )
-' > /home/web/public/environment.json
+' > "$CONFIG_DIR/environment.json"
 
-if [ -s /home/web/public/environment.json ]; then
+if [ -s "$CONFIG_DIR/environment.json" ]; then
     echo "Configuration written to environment.json from APP_* variables"
 else
-    echo "{}" > /home/web/public/environment.json
+    echo "{}" > "$CONFIG_DIR/environment.json"
     echo "No APP_* environment variables found, created empty environment.json" >&2
 fi
 
