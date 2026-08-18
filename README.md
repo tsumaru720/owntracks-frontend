@@ -8,7 +8,18 @@ A browser-based visualization tool for OwnTracks location data. Handles large da
 
 ## Quick Start
 
-### Option A: Standalone (config.json)
+### Option A: Docker (Recommended) ✅
+
+```bash
+docker run -d \
+  -e APP_API_URL="https://owntracks.example.org" \
+  -p 8080:80 \
+  owntracks-frontend
+```
+
+**Note**: This method generates an `environment.json` file that will be placed in the document root. You can also provide a `config.json` file to override environment variables via bind mounts.
+
+### Option B: Standalone (config.json)
 
 1. Copy the configuration template:
    ```bash
@@ -24,22 +35,12 @@ A browser-based visualization tool for OwnTracks location data. Handles large da
    }
    ```
 
-3. Open `index.html` in a web browser.
+3. Serve the files with a suitable web server (e.g., nginx, Apache, Caddy, Python's `http.server`), then open `index.html` in a web browser.
 
-### Option B: Docker (environment variables)
-
-```bash
-docker run -d \
-  -e APP_API_URL="https://owntracks.example.org" \
-  -p 8080:80 \
-  owntracks-frontend
-```
-
-**Note**: For Docker, the `entrypoint.sh` script collects `APP_*` environment variables and writes them to `environment.json`. You can also provide a `config.json` file to override environment variables.
+**Note**: This option requires a web server because the application loads configuration files and makes API calls that may be restricted by browser security policies when opening `index.html` directly from the filesystem.
 
 ## Features
 
-- **High Performance**: Zoom-based sampling handles 100,000+ points without freezing
 - **Smart Caching**: Display changes use cached data; no repeated API calls
 - **Multiple Visualizations**: Points, route lines, altitude gradients, heatmap
 - **Data Persistence**: Optional localStorage caching across sessions
@@ -57,22 +58,24 @@ docker run -d \
 ## Configuration
 
 Configuration can be provided via:
-1. **Docker**: Set `APP_*` environment variables (entrypoint.sh generates `environment.json`)
+1. **Docker** (recommended): environment variables (entrypoint.sh generates `environment.json`) or `config.json`
 2. **Standalone**: Create `config.json` file
 3. **Both**: `config.json` overrides environment variables
 
 ### Configuration Reference
+
+**Note**: A lot of the settings here can be configured in the app's settings popout
 
 | Environment Variable | JSON Path | Description | Required | Default |
 |---------------------|-----------|-------------|----------|---------|
 | `APP_API_URL` | `api.url` | OwnTracks recorder API base URL | ✅ Yes | — |
 | `APP_API_USERNAME` | `api.username` | Basic auth username | No | — |
 | `APP_API_PASSWORD` | `api.password` | Basic auth password | No | — |
-| `APP_API_COOKIENAME` | `api.cookieName` | Cookie auth name | No | — |
-| `APP_API_COOKIEVALUE` | `api.cookieValue` | Cookie auth value | No | — |
+| `APP_API_COOKIENAME` | `api.cookieName` | Cookie name | No | — |
+| `APP_API_COOKIEVALUE` | `api.cookieValue` | Cookie value | No | — |
 | `APP_API_TIMEOUT` | `api.timeout` | Request timeout (milliseconds) | No | `600000` |
 | `APP_STORAGE_KEY` | `storage.key` | localStorage key prefix for caching | No | `owntracks_cache` |
-| `APP_MAP_TILESERVER` | `map.tileServer` | Map tile server URL template | No | CARTO voyager |
+| `APP_MAP_TILESERVER` | `map.tileServer` | Map tile server URL template | No | `https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png` |
 | `APP_MAP_DEFAULTCENTER` | `map.defaultCenter` | Default map center as `[lat, lng]` | No | `[51.50138, -0.14189]` |
 | `APP_MAP_DEFAULTZOOM` | `map.defaultZoom` | Default map zoom level | No | `13` |
 | `APP_MAP_MINZOOM` | `map.minZoom` | Minimum zoom level | No | `2` |
@@ -108,7 +111,7 @@ Configuration can be provided via:
 | `APP_DISPLAY_HEATMAP_GRADIENT_HIGHCOLOR` | `display.heatmap.gradient.highColor` | Heatmap high color | No | `#ff0000` |
 | `APP_DISPLAY_STORAGEENABLED` | `display.storageEnabled` | Cache data in browser | No | `true` |
 | `APP_PERFORMANCE_DYNAMICPOINTVISIBILITY` | `performance.dynamicPointVisibility` | Auto-adjust point density | No | `true` |
-| `APP_DEBUG_CONSOLELOGGING` | `debug.consoleLogging` | Enable console logging | No | `true` |
+| `APP_DEBUG_CONSOLELOGGING` | `debug.consoleLogging` | Enable console logging | No | `false` |
 
 ### Authentication Rules
 
@@ -117,7 +120,7 @@ Configuration can be provided via:
 - **Cookie auth**: Set both `cookieName` and `cookieValue`
 - **Both**: You can use basic auth AND cookie auth together
 
-### Example config.json
+### Example config.json structure
 
 ```json
 {
@@ -133,6 +136,9 @@ Configuration can be provided via:
   "defaults": {
     "user": "john",
     "timePeriod": "7days"
+  },
+  "debug": {
+    "consoleLogging": false
   }
 }
 ```
@@ -147,8 +153,11 @@ services:
       - APP_API_URL=https://recorder.example.org
       - APP_API_USERNAME=user
       - APP_API_PASSWORD=pass
+      - APP_MAP_DEFAULTCENTER=[51.50138,-0.14189]
+      - APP_MAP_DEFAULTZOOM=13
       - APP_DEFAULTS_USER=john
       - APP_DEFAULTS_TIMEPERIOD=7days
+      - APP_DEBUG_CONSOLELOGGING=false
     ports:
       - "8080:80"
 ```

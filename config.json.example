@@ -71,6 +71,6 @@
     "dynamicPointVisibility": true
   },
   "debug": {
-    "consoleLogging": true
+    "consoleLogging": false
   }
 }

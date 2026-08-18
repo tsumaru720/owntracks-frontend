@@ -42,7 +42,7 @@
   }
 
   function log(...args) {
-    if (getSetting('consoleLoggingEnabled', true)) {
+    if (getSetting('consoleLoggingEnabled', false)) {
       console.log(...args);
     }
   }
@@ -267,7 +267,7 @@
       sidebarOpen: false,
       autoFitToBounds: true,   // Auto-fit map to data by default
       dynamicPointVisibility: true,  // Enabled by default
-      consoleLoggingEnabled: true  // Console logging enabled by default
+      consoleLoggingEnabled: false  // Console logging disabled by default
     };
     return defaults[key];
   }
@@ -1161,7 +1161,7 @@
 
     // Console logging toggle
     document.getElementById('consoleLoggingEnabled').addEventListener('change', (e) => {
-      saveSetting('consoleLoggingEnabled', e.target.checked, true);
+      saveSetting('consoleLoggingEnabled', e.target.checked, false);
     });
 
     // Save map position/zoom when user manually changes the map (only when auto-fit is disabled)
@@ -1276,7 +1276,7 @@
     document.getElementById('dynamicPointVisibility').checked = getSetting('dynamicPointVisibility', true);
 
     // Console logging
-    document.getElementById('consoleLoggingEnabled').checked = getSetting('consoleLoggingEnabled', true);
+    document.getElementById('consoleLoggingEnabled').checked = getSetting('consoleLoggingEnabled', false);
 
     // Dark mode toggle is updated in applyTheme()
   }
