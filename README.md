@@ -52,6 +52,17 @@ services:
 
 **Note**: This option requires a web server because the application loads configuration files and makes API calls that may be restricted by browser security policies when opening `index.html` directly from the filesystem.
 
+## Advisory
+
+The OwnTracks recorder (the API) can take a long time to give a response if querying a lot of data. If you are proxying it via nginx for example, you may need to increase the proxy timeouts
+
+```
+    proxy_connect_timeout 10m;
+    proxy_send_timeout    10m;
+    proxy_read_timeout    10m;
+    send_timeout          10m;
+```
+
 ## Features
 
 - **Smart Caching**: Display changes use cached data; no repeated API calls
