@@ -387,8 +387,6 @@
   }
 
   function initMap() {
-    console.log('Initializing map...');
-
     // Start with world view
     state.map = L.map('map', {
       zoomControl: false,
@@ -396,8 +394,6 @@
       zoomSnap: 0, // Allow fractional zoom levels for smoother transitions
       wheelPxPerZoomLevel: 60 // Slower scroll zoom
     }).setView([0, 0], 2);
-
-    console.log('Map created:', state.map);
 
     // Add zoom control to top-right
     L.control.zoom({
@@ -410,7 +406,6 @@
       prefix: ''
     }).addTo(state.map);
 
-    console.log('Adding tile layer...');
     // Add tile layer
     updateTileLayer();
 
@@ -436,7 +431,7 @@
     // Add proximity click handler for easier point interaction
     state.map.on('click', handleProximityClick);
 
-    console.log('Map initialization complete');
+    log('Map initialization complete');
   }
 
   function updateTileLayer() {
@@ -449,7 +444,7 @@
 
     // Add new tile layer - simplified for debugging
     const tileUrl = getMapSetting('tileServer');
-    console.log('Adding tile layer with URL:', tileUrl);
+    log('Adding tile layer with URL:', tileUrl);
 
     const tileLayer = L.tileLayer(tileUrl, {
       minZoom: getMapSetting('minZoom'),
@@ -459,7 +454,6 @@
     });
 
     tileLayer.addTo(state.map);
-    console.log('Tile layer added to map');
   }
 
   // ============================================================================
@@ -1344,9 +1338,6 @@
     document.querySelectorAll('.section-toggle:not(.collapsed)').forEach(toggle => {
       const content = toggle.nextElementSibling;
       if (content) {
-        const sectionName = toggle.getAttribute('data-section');
-        const oldHeight = content.style.maxHeight;
-
         // Temporarily disable transitions for accurate measurement
         content.style.transition = 'none';
         content.style.maxHeight = 'none';
@@ -1355,13 +1346,6 @@
         void content.offsetHeight;
 
         const height = content.scrollHeight;
-        const rectHeight = content.getBoundingClientRect().height;
-        console.log(`[Height Debug] ${sectionName} section load:`, {
-          scrollHeight: height,
-          rectHeight: rectHeight,
-          computedStyle: window.getComputedStyle(content).height,
-          was: oldHeight
-        });
 
         // Re-enable transitions and set height
         content.style.transition = '';
@@ -1375,15 +1359,11 @@
     document.querySelectorAll('.sub-section-header:not(.collapsed)').forEach(header => {
       const content = header.nextElementSibling;
       if (content) {
-        const subName = header.getAttribute('data-sub');
-        const oldHeight = content.style.maxHeight;
-
         content.style.transition = 'none';
         content.style.maxHeight = 'none';
         void content.offsetHeight;
 
         const height = content.scrollHeight;
-        console.log(`[Height Debug] ${subName} sub-section height: ${height}px (was ${oldHeight})`);
 
         content.style.transition = '';
         if (height > 0) {
@@ -1449,22 +1429,11 @@
           toggle.classList.remove('collapsed');
 
           // Now measure with full padding
-          const oldHeight = content.style.maxHeight;
-
           content.style.transition = 'none';
           content.style.maxHeight = 'none';
           void content.offsetHeight; // Force reflow
 
           const targetHeight = content.scrollHeight;
-          const rectHeight = content.getBoundingClientRect().height;
-          console.log(`[Height Debug] ${sectionName} click expand:`, {
-            scrollHeight: targetHeight,
-            rectHeight: rectHeight,
-            computedStyle: window.getComputedStyle(content).height,
-            was: oldHeight,
-            padding: window.getComputedStyle(content).padding,
-            margin: window.getComputedStyle(content).margin
-          });
 
           content.style.transition = '';
 
@@ -1546,7 +1515,6 @@
           void content.offsetHeight; // Force reflow
 
           const targetHeight = content.scrollHeight;
-          console.log(`[Height Debug] ${subName} click expand height: ${targetHeight}px`);
 
           content.style.transition = '';
 
@@ -1787,9 +1755,6 @@
     const period = document.getElementById('timePeriod').value;
     const now = new Date();
     let from, to;
-
-    log('Calculating date range for period:', period);
-    log('Current local date/time:', now);
 
     switch (period) {
       case 'today':
