@@ -9,6 +9,9 @@
   // State Management
   // ============================================================================
 
+  // Sentinel <option> value used for the "All Users" / "All Devices" selections
+  const ALL_SELECTOR = '__all__';
+
   const state = {
     map: null,
     layers: {
@@ -21,6 +24,7 @@
       filtered: [],      // Points after accuracy filter
       users: [],
       devices: [],
+      devicesByUser: {}, // Session cache of device lists per user
       maxAccuracy: 0,
       timeRange: { start: null, end: null },
       sourceBreakdown: { cached: 0, fresh: 0 }
@@ -2003,9 +2007,20 @@
       const usersData = await response.json();
       state.data.users = usersData.results || usersData.result || [];
 
-      // Populate user dropdown
+      // Populate user dropdown: "-" placeholder, "All Users", then each user
       const userSelect = document.getElementById('userSelect');
-      userSelect.innerHTML = '<option value="">Select user</option>';
+      userSelect.innerHTML = '';
+
+      const userPlaceholder = document.createElement('option');
+      userPlaceholder.value = '';
+      userPlaceholder.textContent = '-';
+      userSelect.appendChild(userPlaceholder);
+
+      const allUsersOption = document.createElement('option');
+      allUsersOption.value = ALL_SELECTOR;
+      allUsersOption.textContent = 'All Users';
+      userSelect.appendChild(allUsersOption);
+
       state.data.users.forEach(user => {
         const option = document.createElement('option');
         option.value = user;
@@ -2013,15 +2028,28 @@
         userSelect.appendChild(option);
       });
 
-      // Restore previously selected user, or use config default
+      // Pick which user should be selected:
+      // 1. Previously selected user (localStorage), if still available
+      // 2. Config default user, if valid
+      // 3. The only user, if there is exactly one
+      // 4. Otherwise leave unselected ("-")
       const savedUser = getSetting('selectedUser', '');
       const defaultUser = window.CONFIG.defaults?.user;
-      const userToSelect = savedUser || defaultUser;
+      let userToSelect = '';
 
-      if (userToSelect && state.data.users.includes(userToSelect)) {
-        userSelect.value = userToSelect;
-        await fetchDevices(userToSelect);
+      if (savedUser === ALL_SELECTOR || (savedUser && state.data.users.includes(savedUser))) {
+        userToSelect = savedUser;
+      } else if (defaultUser && state.data.users.includes(defaultUser)) {
+        userToSelect = defaultUser;
+      } else if (state.data.users.length === 1) {
+        userToSelect = state.data.users[0];
       }
+
+      userSelect.value = userToSelect;
+      saveSetting('selectedUser', userToSelect, '');
+
+      // Populate the device dropdown for whichever user is now selected
+      await updateDeviceSelect();
 
       // Recalculate section heights after dropdowns are populated
       requestAnimationFrame(() => {
@@ -2041,65 +2069,150 @@
     }
   }
 
-  async function fetchDevices(user) {
-    if (!user) return;
+  // Fetch the device list for a single user and cache it for the session
+  async function fetchDevicesForUser(user) {
+    const devicesUrl = `${window.CONFIG.api.url}/api/0/list?user=${encodeURIComponent(user)}`;
 
-    try {
-      showLoading('Loading devices...');
+    const response = await fetchWithTimeout(devicesUrl, {
+      headers: buildAuthHeaders()
+    });
 
-      const devicesUrl = `${window.CONFIG.api.url}/api/0/list?user=${encodeURIComponent(user)}`;
+    if (!response.ok) {
+      throw new Error(`Failed to fetch devices: ${response.status}`);
+    }
 
-      const response = await fetchWithTimeout(devicesUrl, {
-        headers: buildAuthHeaders()
-      });
+    const devicesData = await response.json();
+    const devices = devicesData.results || devicesData.result || [];
+    state.data.devicesByUser[user] = devices;
+    return devices;
+  }
 
-      if (!response.ok) {
-        throw new Error(`Failed to fetch devices: ${response.status}`);
-      }
+  /**
+   * Repopulate the device dropdown based on the currently selected user.
+   *
+   * Selection priority: previously selected device (localStorage, if still
+   * available) > config default device > the only device > unselected ("-").
+   *
+   * With "All Users" selected the device dropdown is hidden and the selection
+   * is treated as "All Devices"; the device list of every user is still
+   * fetched so "Load Data" can enumerate all user/device combinations.
+   */
+  async function updateDeviceSelect() {
+    const userSelect = document.getElementById('userSelect');
+    const deviceSelect = document.getElementById('deviceSelect');
+    const deviceGroup = document.getElementById('deviceFormGroup');
+    const user = userSelect.value;
+    const allUsers = user === ALL_SELECTOR;
 
-      const devicesData = await response.json();
-      state.data.devices = devicesData.results || devicesData.result || [];
+    // The device selection is irrelevant for "All Users" - hide the dropdown
+    // and treat the selection as "All Devices"
+    deviceGroup.style.display = allUsers ? 'none' : '';
 
-      // Populate device dropdown
-      const deviceSelect = document.getElementById('deviceSelect');
-      deviceSelect.innerHTML = '<option value="">Select device</option>';
-      state.data.devices.forEach(device => {
-        const option = document.createElement('option');
-        option.value = device;
-        option.textContent = device;
-        deviceSelect.appendChild(option);
-      });
-
-      // Restore previously selected device, or use config default
-      const savedDevice = getSetting('selectedDevice', '');
-      const defaultDevice = window.CONFIG.defaults?.device;
-      const deviceToSelect = savedDevice || defaultDevice;
-
-      if (deviceToSelect && state.data.devices.includes(deviceToSelect)) {
-        deviceSelect.value = deviceToSelect;
-      }
-
-      if (user && deviceSelect.value) {
-        // Only auto-load if there's cached data
-        const storageEnabled = getSetting('storageEnabled', true);
-        if (storageEnabled) {
-          const cachedDays = await getCachedDays(user, deviceSelect.value);
-          if (cachedDays.size > 0) {
-            // Has cached data, load it
-            await loadData();
-          }
-          // Otherwise, remain blank until user explicitly clicks "Load Data"
-        }
-        // If storage is disabled, don't auto-load - wait for explicit user action
-      }
-
-      // Recalculate section heights after device dropdown is populated
+    const recalcHeights = () => {
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           recalculateAllSectionHeights();
         });
       });
+    };
 
+    // No user selected - devices can't be known yet
+    if (!user) {
+      deviceSelect.innerHTML = '';
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = '-';
+      deviceSelect.appendChild(placeholder);
+      deviceSelect.value = '';
+      state.data.devices = [];
+      recalcHeights();
+      return;
+    }
+
+    try {
+      if (allUsers) {
+        showLoading('Loading devices for all users...');
+
+        // Fetch every user's device list (in parallel) so "Load Data" can
+        // enumerate all user/device combinations without further list calls
+        const results = await Promise.allSettled(
+          state.data.users.map(u => fetchDevicesForUser(u))
+        );
+        results.forEach((result, i) => {
+          if (result.status !== 'fulfilled') {
+            logWarn(`Failed to fetch devices for ${state.data.users[i]}:`, result.reason?.message);
+          }
+        });
+
+        // Dropdown stays hidden - just keep it consistent with "All Devices"
+        deviceSelect.innerHTML = '';
+        const placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = '-';
+        deviceSelect.appendChild(placeholder);
+        const allDevicesOption = document.createElement('option');
+        allDevicesOption.value = ALL_SELECTOR;
+        allDevicesOption.textContent = 'All Devices';
+        deviceSelect.appendChild(allDevicesOption);
+        deviceSelect.value = ALL_SELECTOR;
+        state.data.devices = [];
+      } else {
+        showLoading(`Loading devices for ${user}...`);
+        const devices = await fetchDevicesForUser(user);
+        state.data.devices = devices;
+
+        // Populate device dropdown: "-" placeholder, "All Devices", then each device
+        deviceSelect.innerHTML = '';
+
+        const devicePlaceholder = document.createElement('option');
+        devicePlaceholder.value = '';
+        devicePlaceholder.textContent = '-';
+        deviceSelect.appendChild(devicePlaceholder);
+
+        const allDevicesOption = document.createElement('option');
+        allDevicesOption.value = ALL_SELECTOR;
+        allDevicesOption.textContent = 'All Devices';
+        deviceSelect.appendChild(allDevicesOption);
+
+        devices.forEach(device => {
+          const option = document.createElement('option');
+          option.value = device;
+          option.textContent = device;
+          deviceSelect.appendChild(option);
+        });
+
+        const savedDevice = getSetting('selectedDevice', '');
+        const defaultDevice = window.CONFIG.defaults?.device;
+        let deviceToSelect = '';
+
+        if (savedDevice === ALL_SELECTOR || (savedDevice && devices.includes(savedDevice))) {
+          deviceToSelect = savedDevice;
+        } else if (defaultDevice && devices.includes(defaultDevice)) {
+          deviceToSelect = defaultDevice;
+        } else if (devices.length === 1) {
+          deviceToSelect = devices[0];
+        }
+
+        deviceSelect.value = deviceToSelect;
+        saveSetting('selectedDevice', deviceToSelect, '');
+
+        // Auto-load only for a single specific user/device pair, and only when
+        // it already has cached data. "All Users"/"All Devices" selections stay
+        // behind an explicit "Load Data" click so page load doesn't fire off a
+        // swarm of API requests.
+        if (deviceToSelect && deviceToSelect !== ALL_SELECTOR) {
+          const storageEnabled = getSetting('storageEnabled', true);
+          if (storageEnabled) {
+            const cachedDays = await getCachedDays(user, deviceToSelect);
+            if (cachedDays.size > 0) {
+              await loadData();
+            }
+          }
+          // If storage is disabled, don't auto-load - wait for explicit user action
+        }
+      }
+
+      recalcHeights();
       hideLoading();
 
     } catch (error) {
@@ -2111,12 +2224,172 @@
     }
   }
 
-  async function loadData() {
-    const user = document.getElementById('userSelect').value;
-    const device = document.getElementById('deviceSelect').value;
+  /**
+   * Resolve the currently selected user/device dropdown values into the list
+   * of concrete user/device combinations to load. "All Users"/"All Devices"
+   * expand to every matching combination.
+   */
+  async function resolveSelectedCombos() {
+    const userSel = document.getElementById('userSelect').value;
+    // "All Users" always implies "All Devices" (the device dropdown is hidden)
+    const deviceSel = userSel === ALL_SELECTOR
+      ? ALL_SELECTOR
+      : document.getElementById('deviceSelect').value;
 
-    if (!user || !device) {
+    if (!userSel || !deviceSel) {
+      return [];
+    }
+
+    const users = userSel === ALL_SELECTOR ? state.data.users : [userSel];
+    const combos = [];
+
+    for (const user of users) {
+      let devices = state.data.devicesByUser[user];
+      if (devices === undefined) {
+        try {
+          devices = await fetchDevicesForUser(user);
+        } catch (e) {
+          logWarn(`Failed to fetch device list for ${user}:`, e.message);
+          devices = [];
+        }
+      }
+
+      if (deviceSel === ALL_SELECTOR) {
+        devices.forEach(device => combos.push({ user, device }));
+      } else if (devices.includes(deviceSel)) {
+        combos.push({ user, device: deviceSel });
+      }
+    }
+
+    return combos;
+  }
+
+  /**
+   * Load data for a single user/device combination: cached days first, then
+   * API requests for any uncached day ranges. `label` identifies the combo
+   * in the loading overlay (e.g. "2/5 simon/iphone"). Returns the combined
+   * points plus per-source counts for the stats display.
+   */
+  async function loadDataForCombo(user, device, fromDate, toDate, requestedDays, storageEnabled, label) {
+    let comboData = [];
+    let cachedCount = 0;
+    let freshCount = 0;
+
+    if (storageEnabled) {
+      // Load cached days
+      const cachedDays = await getCachedDays(user, device);
+      log('Requested days:', requestedDays);
+      log('Cached days:', Array.from(cachedDays));
+      const daysToLoad = requestedDays.filter(day => cachedDays.has(day));
+      log('Days to load from cache:', daysToLoad);
+
+      if (daysToLoad.length > 0) {
+        showLoading(`Loading ${label} (${daysToLoad.length} cached day${daysToLoad.length > 1 ? 's' : ''})...`);
+        const cachedData = await loadCachedDays(user, device, daysToLoad);
+        cachedCount = cachedData.length;
+        comboData = comboData.concat(cachedData);
+      }
+    }
+
+    // Find uncached day ranges
+    const uncachedRanges = storageEnabled
+      ? await getUncachedDayRanges(user, device, requestedDays)
+      : [{ from: fromDate, to: toDate }];
+
+    log('Uncached ranges:', uncachedRanges);
+
+    // Fetch uncached data
+    for (const range of uncachedRanges) {
+      const daysInThisRange = getDaysInRange(range.from, range.to);
+      showLoading(
+        `Fetching ${label} (${daysInThisRange.length} day${daysInThisRange.length > 1 ? 's' : ''} from API)...`,
+        'This may take several minutes for large date ranges.'
+      );
+
+      const rangeFrom = new Date(range.from + 'T00:00:00');
+      const rangeTo = new Date(range.to + 'T23:59:59');
+
+      // Check if this range includes today and today is already cached
+      // If so, do a smart incremental update from the last cached point to midnight
+      const todayKey = formatDateForInput(new Date());
+      const todayInThisRange = daysInThisRange.includes(todayKey);
+      const cachedDays = await getCachedDays(user, device);
+      let effectiveRangeFrom = rangeFrom;
+      let effectiveRangeTo = rangeTo;
+
+      if (storageEnabled && todayInThisRange && cachedDays.has(todayKey)) {
+        // Smart incremental update for today - from last cached point to midnight
+        const latestCachedTs = await getLatestCachedTimestamp(user, device, [todayKey]);
+        if (latestCachedTs) {
+          const midnightTonight = new Date(range.to + 'T23:59:59');
+          effectiveRangeFrom = new Date((latestCachedTs + 1) * 1000);
+
+          // Only do incremental if we haven't reached midnight yet
+          if (effectiveRangeFrom >= midnightTonight) {
+            log('[Smart Load] Today already cached up to midnight, skipping');
+            continue;
+          }
+
+          effectiveRangeTo = midnightTonight;
+          log('[Smart Load] Incremental update for today from', effectiveRangeFrom, 'to', effectiveRangeTo);
+        }
+      }
+
+      // Use local time formatting to avoid timezone issues
+      const fromStr = formatDateForAPI(effectiveRangeFrom, 'start');
+      const toStr = formatDateForAPI(effectiveRangeTo, 'end');
+
+      log(`[Date Debug] API Request: User ${user}, Device ${device}`);
+      log(`[Date Debug] Requested local range: ${range.from} to ${range.to}`);
+      log(`[Date Debug] Local date objects: ${effectiveRangeFrom.toLocaleString()} to ${effectiveRangeTo.toLocaleString()}`);
+      log(`[Date Debug] UTC for API: from=${fromStr}, to=${toStr}`);
+
+      const locationsUrl = `${window.CONFIG.api.url}/api/0/locations?` +
+        `from=${encodeURIComponent(fromStr)}&` +
+        `to=${encodeURIComponent(toStr)}&` +
+        `user=${encodeURIComponent(user)}&` +
+        `device=${encodeURIComponent(device)}&` +
+        `format=json`;
+
+      const response = await fetchWithTimeout(locationsUrl, {
+        headers: buildAuthHeaders()
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch locations: ${response.status}`);
+      }
+
+      const result = await response.json();
+      const rangeData = result.data || [];
+
+      // Track fresh point count
+      freshCount += rangeData.length;
+
+      // Cache the data by day if storage is enabled
+      if (storageEnabled && rangeData.length > 0) {
+        const dailyData = splitDataByDays(rangeData, range.from, range.to);
+        await cacheDailyData(user, device, dailyData);
+      }
+
+      comboData = comboData.concat(rangeData);
+    }
+
+    return { data: comboData, cachedCount, freshCount };
+  }
+
+  async function loadData() {
+    const userSel = document.getElementById('userSelect').value;
+    const deviceSel = document.getElementById('deviceSelect').value;
+
+    // "All Users" implies "All Devices"; otherwise both must be selected
+    if (!userSel || (userSel !== ALL_SELECTOR && !deviceSel)) {
       showError('Please select both user and device.');
+      return;
+    }
+
+    const combos = await resolveSelectedCombos();
+    if (combos.length === 0) {
+      showError('No user/device combinations found for this selection.');
       return;
     }
 
@@ -2132,114 +2405,36 @@
       let allData = [];
       let cachedPointCount = 0;
       let freshPointCount = 0;
+      const multi = combos.length > 1;
 
-      if (storageEnabled) {
-        // Load cached days
-        const cachedDays = await getCachedDays(user, device);
-        log('Requested days:', requestedDays);
-        log('Cached days:', Array.from(cachedDays));
-        const daysToLoad = requestedDays.filter(day => cachedDays.has(day));
-        log('Days to load from cache:', daysToLoad);
+      for (let i = 0; i < combos.length; i++) {
+        const { user, device } = combos[i];
+        const label = multi ? `${i + 1}/${combos.length} ${user}/${device}` : `${user}/${device}`;
 
-        if (daysToLoad.length > 0) {
-          showLoading(`Loading ${daysToLoad.length} cached days...`);
-          allData = await loadCachedDays(user, device, daysToLoad);
-          cachedPointCount = allData.length;
-        }
+        const comboResult = await loadDataForCombo(
+          user, device, fromDate, toDate, requestedDays, storageEnabled, label
+        );
+
+        // Tag points with their source so tracks can be kept contiguous
+        comboResult.data.forEach(point => {
+          point.user = user;
+          point.device = device;
+        });
+
+        cachedPointCount += comboResult.cachedCount;
+        freshPointCount += comboResult.freshCount;
+        allData = allData.concat(comboResult.data);
       }
 
-      // Find uncached day ranges
-      const uncachedRanges = storageEnabled
-        ? await getUncachedDayRanges(user, device, requestedDays)
-        : [{ from: fromDate, to: toDate }];
-
-      log('Uncached ranges:', uncachedRanges);
-
-      // Fetch uncached data
-      if (uncachedRanges.length > 0) {
-        const totalDays = uncachedRanges.reduce((sum, r) => {
-          const days = getDaysInRange(r.from, r.to);
-          return sum + days.length;
-        }, 0);
-
-        for (const range of uncachedRanges) {
-          const daysInThisRange = getDaysInRange(range.from, range.to);
-          showLoading(
-            `Fetching ${daysInThisRange.length} day${daysInThisRange.length > 1 ? 's' : ''} from API...`,
-            'This may take several minutes for large date ranges.'
-          );
-
-          const rangeFrom = new Date(range.from + 'T00:00:00');
-          const rangeTo = new Date(range.to + 'T23:59:59');
-
-          // Check if this range includes today and today is already cached
-          // If so, do a smart incremental update from the last cached point to midnight
-          const todayKey = formatDateForInput(new Date());
-          const todayInThisRange = daysInThisRange.includes(todayKey);
-          const cachedDays = await getCachedDays(user, device);
-          let effectiveRangeFrom = rangeFrom;
-          let effectiveRangeTo = rangeTo;
-
-          if (storageEnabled && todayInThisRange && cachedDays.has(todayKey)) {
-            // Smart incremental update for today - from last cached point to midnight
-            const latestCachedTs = await getLatestCachedTimestamp(user, device, [todayKey]);
-            if (latestCachedTs) {
-              const midnightTonight = new Date(range.to + 'T23:59:59');
-              effectiveRangeFrom = new Date((latestCachedTs + 1) * 1000);
-
-              // Only do incremental if we haven't reached midnight yet
-              if (effectiveRangeFrom >= midnightTonight) {
-                log('[Smart Load] Today already cached up to midnight, skipping');
-                continue;
-              }
-
-              effectiveRangeTo = midnightTonight;
-              log('[Smart Load] Incremental update for today from', effectiveRangeFrom, 'to', effectiveRangeTo);
-            }
-          }
-
-          // Use local time formatting to avoid timezone issues
-          const fromStr = formatDateForAPI(effectiveRangeFrom, 'start');
-          const toStr = formatDateForAPI(effectiveRangeTo, 'end');
-
-          log(`[Date Debug] API Request: User ${user}, Device ${device}`);
-          log(`[Date Debug] Requested local range: ${range.from} to ${range.to}`);
-          log(`[Date Debug] Local date objects: ${effectiveRangeFrom.toLocaleString()} to ${effectiveRangeTo.toLocaleString()}`);
-          log(`[Date Debug] UTC for API: from=${fromStr}, to=${toStr}`);
-
-          const locationsUrl = `${window.CONFIG.api.url}/api/0/locations?` +
-            `from=${encodeURIComponent(fromStr)}&` +
-            `to=${encodeURIComponent(toStr)}&` +
-            `user=${encodeURIComponent(user)}&` +
-            `device=${encodeURIComponent(device)}&` +
-            `format=json`;
-
-          const response = await fetchWithTimeout(locationsUrl, {
-            headers: buildAuthHeaders()
-          });
-
-          if (!response.ok) {
-            throw new Error(`Failed to fetch locations: ${response.status}`);
-          }
-
-          const result = await response.json();
-          const rangeData = result.data || [];
-
-          // Track fresh point count
-          freshPointCount += rangeData.length;
-
-          // Cache the data by day if storage is enabled
-          if (storageEnabled && rangeData.length > 0) {
-            const dailyData = splitDataByDays(rangeData, range.from, range.to);
-            await cacheDailyData(user, device, dailyData);
-          }
-
-          allData = allData.concat(rangeData);
-        }
-      }
-
-      // Sort data by timestamp
-      allData.sort((a, b) => a.tst - b.tst);
+      // Sort so each user/device track stays contiguous (avoids route lines
+      // jumping between devices), ordered by time within each track
+      allData.sort((a, b) => {
+        const userCmp = String(a.user || '').localeCompare(String(b.user || ''));
+        if (userCmp !== 0) return userCmp;
+        const deviceCmp = String(a.device || '').localeCompare(String(b.device || ''));
+        if (deviceCmp !== 0) return deviceCmp;
+        return a.tst - b.tst;
+      });
       state.data.raw = allData;
 
       // Store source breakdown for indicator
@@ -2900,7 +3095,7 @@
   async function handleUserChange() {
     const user = document.getElementById('userSelect').value;
     saveSetting('selectedUser', user, '');
-    await fetchDevices(user);
+    await updateDeviceSelect();
     await updateRefreshButton();
   }
 
@@ -3466,17 +3661,21 @@
     const storageEnabled = getSetting('storageEnabled', true);
     const user = document.getElementById('userSelect').value;
     const device = document.getElementById('deviceSelect').value;
+    // Refresh button and per-combo cache text only make sense for a single
+    // specific user/device selection (not "All Users"/"All Devices")
+    const singleSelection = user && device && user !== ALL_SELECTOR && device !== ALL_SELECTOR;
 
     let hasCachedData = false;
     let cachedCount = 0;
     let requestedCount = 0;
+    let cachedDays = new Set();
 
-    if (storageEnabled && user && device) {
+    if (storageEnabled && singleSelection) {
       const { from, to } = getDateRange();
       const fromDate = formatDateForInput(from);
       const toDate = formatDateForInput(to);
       const requestedDays = getDaysInRange(fromDate, toDate);
-      const cachedDays = await getCachedDays(user, device);
+      cachedDays = await getCachedDays(user, device);
 
       requestedCount = requestedDays.length;
 
@@ -3505,28 +3704,34 @@
 
     // Update cache status text with storage usage
     const cacheStatusEl = document.getElementById('cacheStatus');
-    if (storageEnabled && user && device) {
+    if (storageEnabled && singleSelection) {
       cacheStatusEl.style.display = 'block';
-      const totalCached = (await getCachedDays(user, device)).size;
       const usage = await calculateStorageUsage();
       document.getElementById('cacheStatusText').textContent =
-        `Cache: ${totalCached} day${totalCached === 1 ? '' : 's'} stored for ${user}/${device} (${formatBytes(usage.cache)} used)`;
+        `Cache: ${cachedDays.size} day${cachedDays.size === 1 ? '' : 's'} stored for ${user}/${device} (${formatBytes(usage.cache)} used)`;
     } else if (storageEnabled) {
       cacheStatusEl.style.display = 'block';
       const usage = await calculateStorageUsage();
       document.getElementById('cacheStatusText').textContent =
-        `Cache: enabled (no data cached yet, ${formatBytes(usage.cache)} used)`;
+        `Cache: enabled (${formatBytes(usage.cache)} used)`;
     } else {
       cacheStatusEl.style.display = 'none';
     }
   }
 
   async function loadDataFromAPI() {
-    const user = document.getElementById('userSelect').value;
-    const device = document.getElementById('deviceSelect').value;
+    const userSel = document.getElementById('userSelect').value;
+    const deviceSel = document.getElementById('deviceSelect').value;
 
-    if (!user || !device) {
+    // "All Users" implies "All Devices"; otherwise both must be selected
+    if (!userSel || (userSel !== ALL_SELECTOR && !deviceSel)) {
       showError('Please select user and device first');
+      return;
+    }
+
+    const combos = await resolveSelectedCombos();
+    if (combos.length === 0) {
+      showError('No user/device combinations found for this selection.');
       return;
     }
 
@@ -3541,40 +3746,46 @@
       // Always fetch the complete day range from midnight to just before midnight
       const rangeFrom = new Date(fromDate + 'T00:00:00');
       const rangeTo = new Date(toDate + 'T23:59:59');
-
-      showLoading(
-        `Refreshing ${requestedDays.length} day${requestedDays.length > 1 ? 's' : ''} from API...`,
-        'This may take several minutes for large date ranges.'
-      );
-
       const fromStr = formatDateForAPI(rangeFrom, 'start');
       const toStr = formatDateForAPI(rangeTo, 'end');
 
-      log(`[Refresh Debug] Full refresh: ${fromStr} to ${toStr} (${requestedDays.length} days)`);
+      const multi = combos.length > 1;
 
-      const locationsUrl = `${window.CONFIG.api.url}/api/0/locations?` +
-        `from=${encodeURIComponent(fromStr)}&` +
-        `to=${encodeURIComponent(toStr)}&` +
-        `user=${encodeURIComponent(user)}&` +
-        `device=${encodeURIComponent(device)}&` +
-        `format=json`;
+      for (let i = 0; i < combos.length; i++) {
+        const { user, device } = combos[i];
+        const label = multi ? `${i + 1}/${combos.length} ${user}/${device}` : `${user}/${device}`;
 
-      const response = await fetchWithTimeout(locationsUrl, {
-        headers: buildAuthHeaders()
-      });
+        showLoading(
+          `Refreshing ${label} (${requestedDays.length} day${requestedDays.length > 1 ? 's' : ''} from API)...`,
+          'This may take several minutes for large date ranges.'
+        );
 
-      if (!response.ok) {
-        throw new Error(`Failed to fetch locations: ${response.status}`);
-      }
+        log(`[Refresh Debug] Full refresh: ${fromStr} to ${toStr} (${requestedDays.length} days) for ${label}`);
 
-      const result = await response.json();
-      const allData = result.data || [];
+        const locationsUrl = `${window.CONFIG.api.url}/api/0/locations?` +
+          `from=${encodeURIComponent(fromStr)}&` +
+          `to=${encodeURIComponent(toStr)}&` +
+          `user=${encodeURIComponent(user)}&` +
+          `device=${encodeURIComponent(device)}&` +
+          `format=json`;
 
-      // Cache the data by day if storage is enabled
-      if (storageEnabled && allData.length > 0) {
-        const dailyData = splitDataByDays(allData, fromDate, toDate);
-        await cacheDailyData(user, device, dailyData);
-        log(`[Refresh Debug] Cached ${allData.length} points across ${requestedDays.length} day(s)`);
+        const response = await fetchWithTimeout(locationsUrl, {
+          headers: buildAuthHeaders()
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to fetch locations: ${response.status}`);
+        }
+
+        const result = await response.json();
+        const comboData = result.data || [];
+
+        // Cache the data by day if storage is enabled
+        if (storageEnabled && comboData.length > 0) {
+          const dailyData = splitDataByDays(comboData, fromDate, toDate);
+          await cacheDailyData(user, device, dailyData);
+          log(`[Refresh Debug] Cached ${comboData.length} points for ${label} across ${requestedDays.length} day(s)`);
+        }
       }
 
       // Now load and display the data
