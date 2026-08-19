@@ -1424,7 +1424,6 @@
 
       const defaults = {
         datasource: false,    // Data Source expanded by default
-        storage: true,        // Storage collapsed by default
         stats: false,         // Stats expanded by default
         display: false,       // Display Options expanded by default
         accuracy: true,       // Accuracy Filter collapsed by default
@@ -3649,23 +3648,28 @@
     const cacheStatusEl = document.getElementById('cacheStatus');
     let usage = null;
     let statusText = null;
+    let usageText = null;
 
     if (storageEnabled && singleSelection) {
       usage = await calculateStorageUsage(user, device);
-      statusText = `Cache: ${cachedDays.size} day${cachedDays.size === 1 ? '' : 's'} stored for ${user}/${device} (${formatBytes(usage.selection)} / ${formatBytes(usage.total)} used)`;
+      statusText = `Cache: ${cachedDays.size} day${cachedDays.size === 1 ? '' : 's'} stored for ${user}/${device}`;
+      usageText = `${formatBytes(usage.selection)} / ${formatBytes(usage.total)} used`;
     } else if (storageEnabled && user && user !== ALL_SELECTOR) {
       // All Devices for one user: selection bytes = every device of that user
       usage = await calculateStorageUsage(user);
-      statusText = `Cache: enabled (${formatBytes(usage.selection)} / ${formatBytes(usage.total)} used)`;
+      statusText = 'Cache: enabled';
+      usageText = `${formatBytes(usage.selection)} / ${formatBytes(usage.total)} used`;
     } else if (storageEnabled) {
       // All Users: the selection is everything, so only the total is shown
       usage = await calculateStorageUsage();
-      statusText = `Cache: enabled (${formatBytes(usage.total)} used)`;
+      statusText = 'Cache: enabled';
+      usageText = `${formatBytes(usage.total)} used`;
     }
 
     if (usage) {
       cacheStatusEl.style.display = 'block';
       document.getElementById('cacheStatusText').textContent = statusText;
+      document.getElementById('cacheUsageText').textContent = usageText;
       // Progress bar: share of total storage used by the current selection
       const pct = usage.total > 0 ? Math.min(100, (usage.selection / usage.total) * 100) : 0;
       document.getElementById('cacheProgressFill').style.width = `${pct.toFixed(1)}%`;

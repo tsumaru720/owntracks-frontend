@@ -113,51 +113,6 @@
       </div>
     </div>
 
-    <!-- Data Storage Section -->
-    <div class="sidebar-section" data-section="storage">
-      <h3 class="section-toggle" data-section="storage">
-        <span class="section-icon">▶</span>
-        Data Storage
-      </h3>
-      <div class="section-content">
-        <div class="checkbox-group form-group">
-          <input type="checkbox" id="storageEnabled" checked>
-          <label for="storageEnabled">Cache location data in browser</label>
-        </div>
-        <small style="opacity: 0.7; display: block; margin-top: 5px; line-height: 1.4;">
-          Caches GPS location data locally to speed up loading and reduce API calls. Location data is cached per day, per device. Refreshing only fetches missing days.
-        </small>
-      </div>
-    </div>
-
-    <!-- Stats Panel -->
-    <div class="sidebar-section" data-section="stats">
-      <h3 class="section-toggle" data-section="stats">
-        <span class="section-icon">▶</span>
-        Statistics
-      </h3>
-      <div class="section-content">
-        <div class="stats-panel" id="statsPanel">
-          <div class="stat-row">
-            <span class="stat-label">Total points:</span>
-            <span class="stat-value" id="statTotal">-</span>
-          </div>
-          <div class="stat-row">
-            <span class="stat-label">Visible points:</span>
-            <span class="stat-value" id="statVisible">-</span>
-          </div>
-          <div class="stat-row">
-            <span class="stat-label">Time range:</span>
-            <span class="stat-value" id="statTimeRange">-</span>
-          </div>
-          <div class="stat-row">
-            <span class="stat-label">Max accuracy:</span>
-            <span class="stat-value" id="statMaxAccuracy">-</span>
-          </div>
-        </div>
-      </div>
-    </div>
-
     <!-- Display Options -->
     <div class="sidebar-section" data-section="display">
       <h3 class="section-toggle" data-section="display">
@@ -401,6 +356,42 @@
       </div>
     </div>
 
+    <!-- Stats Panel -->
+    <div class="sidebar-section" data-section="stats">
+      <h3 class="section-toggle" data-section="stats">
+        <span class="section-icon">▶</span>
+        Statistics
+      </h3>
+      <div class="section-content">
+        <div class="stats-panel" id="statsPanel">
+          <div class="stat-row">
+            <span class="stat-label">Total points:</span>
+            <span class="stat-value" id="statTotal">-</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">Visible points:</span>
+            <span class="stat-value" id="statVisible">-</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">Time range:</span>
+            <span class="stat-value" id="statTimeRange">-</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">Max accuracy:</span>
+            <span class="stat-value" id="statMaxAccuracy">-</span>
+          </div>
+        </div>
+
+        <div id="cacheStatus" class="cache-status" style="display: none;">
+          <span id="cacheStatusText"></span>
+          <span id="cacheUsageText" class="cache-usage"></span>
+          <div class="cache-progress">
+            <div class="cache-progress-fill" id="cacheProgressFill"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Debug Section -->
     <div class="sidebar-section" data-section="debug">
       <h3 class="section-toggle" data-section="debug">
@@ -412,7 +403,7 @@
           <input type="checkbox" id="dynamicPointVisibility" checked>
           <label for="dynamicPointVisibility">Dynamic Point Visibility</label>
         </div>
-        <small style="opacity: 0.7; display: block; margin-top: 5px; margin-bottom: 15px;">
+        <small style="opacity: 0.7; display: block; margin-top: -8px; margin-bottom: 20px;">
           Automatically adjusts point density based on zoom level and total points. Lines remain visible even when points are sampled.
         </small>
 
@@ -420,8 +411,16 @@
           <input type="checkbox" id="consoleLoggingEnabled" checked>
           <label for="consoleLoggingEnabled">Console Logging</label>
         </div>
-        <small style="opacity: 0.7; display: block; margin-top: 5px; margin-bottom: 15px;">
+        <small style="opacity: 0.7; display: block; margin-top: -8px; margin-bottom: 20px;">
           Enable console.log output for debugging. Disable to reduce console noise.
+        </small>
+
+        <div class="checkbox-group form-group">
+          <input type="checkbox" id="storageEnabled" checked>
+          <label for="storageEnabled">Cache location data in browser</label>
+        </div>
+        <small style="opacity: 0.7; display: block; margin-top: -8px; margin-bottom: 20px; line-height: 1.4;">
+          Caches GPS location data locally to speed up loading and reduce API calls. Location data is cached per day, per device. Refreshing only fetches missing days.
         </small>
 
         <div class="form-group">
@@ -439,13 +438,6 @@
         <div class="form-group">
           <button class="btn btn-danger btn-block" id="clearAllDataBtn">Clear All Data</button>
           <small style="opacity: 0.7; display: block; margin-top: 4px;">Removes everything: cached data, display settings, and theme</small>
-        </div>
-
-        <div id="cacheStatus" class="cache-status" style="display: none;">
-          <span id="cacheStatusText"></span>
-          <div class="cache-progress">
-            <div class="cache-progress-fill" id="cacheProgressFill"></div>
-          </div>
         </div>
       </div>
     </div>
