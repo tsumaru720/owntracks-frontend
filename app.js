@@ -1060,47 +1060,57 @@
       updateDarkModeToggle();
     });
 
-    // Clear cache button (only removes cached data from IndexedDB, keeps settings in localStorage)
-    document.getElementById('clearCacheBtn').addEventListener('click', async () => {
+    // Clear device cache button (removes cached data for the currently
+    // selected user/device, keeps settings in localStorage)
+    document.getElementById('clearDeviceCacheBtn').addEventListener('click', async () => {
+      const userSel = document.getElementById('userSelect').value;
+      const deviceSel = document.getElementById('deviceSelect').value;
+
+      if (!userSel) {
+        showError('Select a user (and optionally a device) before clearing the device cache.');
+        return;
+      }
+
+      let confirmMessage;
+      if (userSel === ALL_SELECTOR) {
+        confirmMessage = 'All Users is selected, so this will clear the cached location data for every user and device. Your display settings and theme will be kept.';
+      } else if (deviceSel && deviceSel !== ALL_SELECTOR) {
+        confirmMessage = `Are you sure you want to clear the cached location data for ${userSel}/${deviceSel}? Your display settings and theme will be kept.`;
+      } else {
+        confirmMessage = `No specific device is selected, so this will clear the cached location data for every device of ${userSel}. Your display settings and theme will be kept.`;
+      }
+
+      if (!confirm(confirmMessage)) {
+        return;
+      }
+
+      try {
+        if (userSel === ALL_SELECTOR) {
+          // All Users selected - nothing narrower to clear
+          await idbHelper.clearAllCache();
+        } else if (deviceSel && deviceSel !== ALL_SELECTOR) {
+          await idbHelper.clearUserCache(userSel, deviceSel);
+        } else {
+          // All Devices (or no device) selected - clear the whole user
+          await idbHelper.clearUserAllDevicesCache(userSel);
+        }
+
+        // Clear any map data currently displayed
+        clearMapData();
+
+        location.reload();
+      } catch (e) {
+        logError('Failed to clear device cache:', e);
+        showError('Failed to clear device cache: ' + e.message);
+      }
+    });
+
+    // Clear all cache button (only removes cached data from IndexedDB, keeps settings in localStorage)
+    document.getElementById('clearAllCacheBtn').addEventListener('click', async () => {
       if (confirm('Are you sure you want to clear all cached location data? Your display settings and theme will be kept.')) {
         try {
           // Clear IndexedDB cache
           await idbHelper.clearAllCache();
-
-          // Also clear any legacy localStorage cache keys
-          const keys = [];
-          for (let i = 0; i < localStorage.length; i++) {
-            const key = localStorage.key(i);
-            if (key) {
-              keys.push(key);
-            }
-          }
-
-          keys.forEach((key) => {
-            // Keep settings, remove legacy cache keys
-            if (key === 'owntracks_settings') {
-              return;
-            }
-
-            // Remove cache index keys (e.g., "owntracks_cache_user_device_index")
-            if (key.endsWith('_index')) {
-              localStorage.removeItem(key);
-              return;
-            }
-
-            // Remove daily cache keys (contain dates in format YYYY-MM-DD)
-            if (key.match(/\d{4}-\d{2}-\d{2}/)) {
-              localStorage.removeItem(key);
-              return;
-            }
-
-            // Remove any cache keys that start with the cache base
-            const baseKey = window.CONFIG.storage?.key ?? 'owntracks_cache';
-            if (key.startsWith(baseKey)) {
-              localStorage.removeItem(key);
-              return;
-            }
-          });
 
           // Clear any map data currently displayed
           clearMapData();
@@ -1113,9 +1123,19 @@
       }
     });
 
-    // Clear all settings button (clears both IndexedDB cache and localStorage settings)
-    document.getElementById('clearStorageBtn').addEventListener('click', async () => {
-      if (confirm('Are you sure you want to clear ALL settings? This will remove cached data, display settings, and your theme preference.')) {
+    // Clear settings button (empties localStorage, which only holds settings,
+    // without touching any cached location data in IndexedDB)
+    document.getElementById('clearSettingsBtn').addEventListener('click', () => {
+      if (confirm('Are you sure you want to clear all saved settings? Display settings, theme and selections will reset to defaults. Cached location data will be kept.')) {
+        localStorage.clear();
+
+        location.reload();
+      }
+    });
+
+    // Clear all data button (clears both IndexedDB cache and localStorage settings)
+    document.getElementById('clearAllDataBtn').addEventListener('click', async () => {
+      if (confirm('Are you sure you want to clear ALL data? This will remove cached data, display settings, and your theme preference.')) {
         const settings = (() => {
           try {
             const saved = JSON.parse(localStorage.getItem('owntracks_settings') || '{}');
@@ -2715,6 +2735,45 @@
       });
     },
 
+    // Clear cached data for every device belonging to a user
+    async clearUserAllDevicesCache(user) {
+      const db = await this.open();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction([STORE_CACHE, STORE_INDEX], 'readwrite');
+
+        // Clear all cache entries whose key starts with this user
+        const cacheStore = tx.objectStore(STORE_CACHE);
+        const cacheRequest = cacheStore.openCursor(
+          IDBKeyRange.bound([user, '', ''], [user, '￿', '￿'])
+        );
+
+        cacheRequest.onsuccess = (event) => {
+          const cursor = event.target.result;
+          if (cursor) {
+            cursor.delete();
+            cursor.continue();
+          }
+        };
+
+        // Clear the index entries for every device of this user
+        const indexStore = tx.objectStore(STORE_INDEX);
+        const indexRequest = indexStore.openCursor(
+          IDBKeyRange.bound([user, ''], [user, '￿'])
+        );
+
+        indexRequest.onsuccess = (event) => {
+          const cursor = event.target.result;
+          if (cursor) {
+            cursor.delete();
+            cursor.continue();
+          }
+        };
+
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    },
+
     // Calculate storage usage for IndexedDB
     async getStorageUsage() {
       const db = await this.open();
@@ -2730,12 +2789,8 @@
           if (cursor) {
             const value = cursor.value;
             // Estimate size: data buffer size + metadata
-            if (value.data) {
-              if (value.data instanceof Uint8Array) {
-                totalBytes += value.data.byteLength;
-              } else {
-                totalBytes += value.data.length * 2; // UTF-16 string
-              }
+            if (value.data instanceof Uint8Array) {
+              totalBytes += value.data.byteLength;
             }
             cursor.continue();
           }
@@ -2767,18 +2822,6 @@
     }
 
     return days;
-  }
-
-  // Get cache index key for user/device (kept for compatibility, now uses IndexedDB)
-  function getCacheIndexKey(user, device) {
-    const baseKey = window.CONFIG.storage?.key ?? 'owntracks_cache';
-    return `${baseKey}_${user}_${device}_index`;
-  }
-
-  // Get cache key for a specific day (kept for compatibility, now uses IndexedDB)
-  function getDayCacheKey(user, device, dateStr) {
-    const baseKey = window.CONFIG.storage?.key ?? 'owntracks_cache';
-    return `${baseKey}_${user}_${device}_${dateStr}`;
   }
 
   // Get set of cached days for user/device (now uses IndexedDB)
@@ -2835,29 +2878,8 @@
     return dailyData;
   }
 
-  // Convert Uint8Array to base64 string (for legacy localStorage compatibility)
-  function uint8ArrayToBase64(bytes) {
-    let binary = '';
-    const len = bytes.byteLength;
-    for (let i = 0; i < len; i++) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-    return btoa(binary);
-  }
-
-  // Convert base64 string back to Uint8Array (for legacy localStorage compatibility)
-  function base64ToUint8Array(base64) {
-    const binary = atob(base64);
-    const len = binary.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) {
-      bytes[i] = binary.charCodeAt(i);
-    }
-    return bytes;
-  }
-
   // Compress data using gzip compression
-  // Returns Uint8Array for IndexedDB storage (no base64 overhead)
+  // Returns Uint8Array for IndexedDB storage
   function compressPoints(points) {
     if (!points || points.length === 0) return new Uint8Array(0);
 
@@ -2867,7 +2889,6 @@
     if (typeof window.pako !== 'undefined') {
       try {
         // Compress with gzip (highest compression level)
-        // Return Uint8Array directly for IndexedDB (no base64 conversion!)
         return window.pako.gzip(jsonStr, { level: 9 });
       } catch (e) {
         logWarn('Gzip compression failed, using uncompressed:', e);
@@ -2883,7 +2904,6 @@
   }
 
   // Decompress data back to point objects
-  // Handles both Uint8Array (IndexedDB) and base64 strings (legacy localStorage)
   function decompressPoints(compressed) {
     if (!compressed) return [];
 
@@ -2892,56 +2912,28 @@
       return [];
     }
 
-    let jsonStr;
-
-    // Check if input is Uint8Array (from IndexedDB)
-    if (compressed instanceof Uint8Array) {
-      if (typeof window.pako !== 'undefined') {
-        try {
-          // Try to decompress as gzip
-          const decompressed = window.pako.ungzip(compressed, { to: 'string' });
-          jsonStr = decompressed;
-        } catch (e) {
-          // Not compressed, decode as UTF-8
-          const decoder = new TextDecoder();
-          jsonStr = decoder.decode(compressed);
-        }
-      } else {
-        // No pako, decode as UTF-8
-        const decoder = new TextDecoder();
-        jsonStr = decoder.decode(compressed);
-      }
-    } else if (typeof compressed === 'string') {
-      // Legacy base64 format from localStorage
-      // Check if it's base64-encoded gzip data (no newlines, valid base64 chars)
-      if (typeof window.pako !== 'undefined' && !compressed.includes(' ') && compressed.length > 50) {
-        try {
-          const compressedData = base64ToUint8Array(compressed);
-          const decompressed = window.pako.ungzip(compressedData, { to: 'string' });
-          jsonStr = decompressed;
-        } catch (e) {
-          // Not compressed data, use as-is
-          jsonStr = compressed;
-        }
-      } else {
-        // Plain JSON
-        jsonStr = compressed;
-      }
-    } else {
+    if (!(compressed instanceof Uint8Array)) {
       logWarn('Unknown compressed data type:', typeof compressed);
       return [];
     }
 
-    const data = JSON.parse(jsonStr);
+    let jsonStr;
 
-    // Handle both new format (direct array) and legacy format (object with points array)
-    if (Array.isArray(data)) {
-      return data;
-    } else if (data.points && Array.isArray(data.points)) {
-      return data.points;
+    if (typeof window.pako !== 'undefined') {
+      try {
+        // Try to decompress as gzip
+        jsonStr = window.pako.ungzip(compressed, { to: 'string' });
+      } catch (e) {
+        // Not compressed, decode as UTF-8
+        jsonStr = new TextDecoder().decode(compressed);
+      }
+    } else {
+      // No pako, decode as UTF-8
+      jsonStr = new TextDecoder().decode(compressed);
     }
 
-    return [];
+    const data = JSON.parse(jsonStr);
+    return Array.isArray(data) ? data : [];
   }
 
   // Store daily data chunks to IndexedDB cache with compression

@@ -807,6 +807,15 @@ body:not(.ui-ready) .sub-section-content {
   background-color: #5a6268;
 }
 
+.btn-danger {
+  background-color: #dc3545;
+  color: #fff;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background-color: #c82333;
+}
+
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;

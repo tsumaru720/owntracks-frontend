@@ -429,12 +429,20 @@
         </small>
 
         <div class="form-group">
-          <button class="btn btn-secondary btn-block" id="clearCacheBtn">Clear Cached Data</button>
-          <small style="opacity: 0.7; display: block; margin-top: 4px;">Removes only location data cache, keeps your display settings and theme</small>
+          <button class="btn btn-secondary btn-block" id="clearDeviceCacheBtn">Clear Device Cache</button>
+          <small style="opacity: 0.7; display: block; margin-top: 4px;">Clears cached location data for the currently selected user/device only</small>
         </div>
         <div class="form-group">
-          <button class="btn btn-secondary btn-block" id="clearStorageBtn">Clear All Settings</button>
-          <small style="opacity: 0.7; display: block; margin-top: 4px;">Removes everything including cached data, display settings, and theme</small>
+          <button class="btn btn-secondary btn-block" id="clearAllCacheBtn">Clear All Cache</button>
+          <small style="opacity: 0.7; display: block; margin-top: 4px;">Removes all cached location data (all users/devices), keeps your display settings and theme</small>
+        </div>
+        <div class="form-group">
+          <button class="btn btn-secondary btn-block" id="clearSettingsBtn">Clear Settings</button>
+          <small style="opacity: 0.7; display: block; margin-top: 4px;">Resets all saved settings (display, theme, selections), keeps all cached data</small>
+        </div>
+        <div class="form-group">
+          <button class="btn btn-danger btn-block" id="clearAllDataBtn">Clear All Data</button>
+          <small style="opacity: 0.7; display: block; margin-top: 4px;">Removes everything: cached data, display settings, and theme</small>
         </div>
       </div>
     </div>
