@@ -216,12 +216,6 @@
     if (saved) {
       try {
         state.settings = JSON.parse(saved);
-
-        // Migration: update old defaults to new defaults
-        if (state.settings.pointSize === 6) {
-          state.settings.pointSize = 4; // New default
-          localStorage.setItem('owntracks_settings', JSON.stringify(state.settings));
-        }
       } catch (e) {
         logWarn('Failed to parse saved settings:', e);
         state.settings = {};
