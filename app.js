@@ -2187,9 +2187,12 @@
 
   /**
    * Load data for a single user/device combination: cached days first, then
-   * API requests for any uncached day ranges. `label` identifies the combo
-   * in the loading overlay (e.g. "2/5 simon/iphone"). Returns the combined
-   * points plus per-source counts for the stats display.
+   * API requests for any uncached day ranges. If the current moment falls
+   * inside the requested range, today's cache is refreshed first with a
+   * dedicated midnight-to-midnight API request so newly recorded points are
+   * picked up. `label` identifies the combo in the loading overlay (e.g.
+   * "2/5 simon/iphone"). Returns the combined points plus per-source counts
+   * for the stats display.
    */
   async function loadDataForCombo(user, device, fromDate, toDate, requestedDays, storageEnabled, label) {
     let comboData = [];
@@ -2197,11 +2200,64 @@
     let freshCount = 0;
 
     if (storageEnabled) {
+      // If the current date/time is inside the requested range, refresh
+      // today's cache with a today-only request (local midnight to local
+      // midnight, converted to UTC for the API) before reading the cache.
+      // Ranges entirely in the past keep the plain cache-first behaviour.
+      const todayKey = formatDateForInput(new Date());
+      let todayRefreshed = false;
+
+      if (requestedDays.includes(todayKey)) {
+        try {
+          showLoading(`Updating today's data for ${label}...`);
+          const todayFrom = new Date(todayKey + 'T00:00:00');
+          const todayTo = new Date(todayKey + 'T23:59:59');
+          const fromStr = formatDateForAPI(todayFrom, 'start');
+          const toStr = formatDateForAPI(todayTo, 'end');
+
+          log(`[Today Refresh] Fetching ${todayKey} for ${label}: from=${fromStr}, to=${toStr}`);
+
+          const todayUrl = `${window.CONFIG.api.url}/api/0/locations?` +
+            `from=${encodeURIComponent(fromStr)}&` +
+            `to=${encodeURIComponent(toStr)}&` +
+            `user=${encodeURIComponent(user)}&` +
+            `device=${encodeURIComponent(device)}&` +
+            `format=json`;
+
+          const response = await fetchWithTimeout(todayUrl, {
+            headers: buildAuthHeaders()
+          });
+
+          if (!response.ok) {
+            throw new Error(`Failed to fetch locations: ${response.status}`);
+          }
+
+          const result = await response.json();
+          const todayData = result.data || [];
+          freshCount += todayData.length;
+
+          // Cache the full day (even when empty) so the uncached-range fetch
+          // below doesn't request today again
+          const dailyData = splitDataByDays(todayData, todayKey, todayKey);
+          await cacheDailyData(user, device, dailyData);
+
+          // Today's points are counted as fresh, so skip today when loading
+          // the rest of the range from cache to avoid counting it twice
+          todayRefreshed = true;
+          comboData = comboData.concat(todayData);
+        } catch (e) {
+          // Best-effort: fall back to whatever the cache already holds for
+          // today so fully-cached ranges still load without an API
+          logWarn(`Failed to refresh today's data for ${label}:`, e.message);
+        }
+      }
+
       // Load cached days
       const cachedDays = await getCachedDays(user, device);
       log('Requested days:', requestedDays);
       log('Cached days:', Array.from(cachedDays));
-      const daysToLoad = requestedDays.filter(day => cachedDays.has(day));
+      const daysToLoad = requestedDays.filter(day =>
+        cachedDays.has(day) && !(todayRefreshed && day === todayKey));
       log('Days to load from cache:', daysToLoad);
 
       if (daysToLoad.length > 0) {
@@ -2230,39 +2286,13 @@
       const rangeFrom = new Date(range.from + 'T00:00:00');
       const rangeTo = new Date(range.to + 'T23:59:59');
 
-      // Check if this range includes today and today is already cached
-      // If so, do a smart incremental update from the last cached point to midnight
-      const todayKey = formatDateForInput(new Date());
-      const todayInThisRange = daysInThisRange.includes(todayKey);
-      const cachedDays = await getCachedDays(user, device);
-      let effectiveRangeFrom = rangeFrom;
-      let effectiveRangeTo = rangeTo;
-
-      if (storageEnabled && todayInThisRange && cachedDays.has(todayKey)) {
-        // Smart incremental update for today - from last cached point to midnight
-        const latestCachedTs = await getLatestCachedTimestamp(user, device, [todayKey]);
-        if (latestCachedTs) {
-          const midnightTonight = new Date(range.to + 'T23:59:59');
-          effectiveRangeFrom = new Date((latestCachedTs + 1) * 1000);
-
-          // Only do incremental if we haven't reached midnight yet
-          if (effectiveRangeFrom >= midnightTonight) {
-            log('[Smart Load] Today already cached up to midnight, skipping');
-            continue;
-          }
-
-          effectiveRangeTo = midnightTonight;
-          log('[Smart Load] Incremental update for today from', effectiveRangeFrom, 'to', effectiveRangeTo);
-        }
-      }
-
       // Use local time formatting to avoid timezone issues
-      const fromStr = formatDateForAPI(effectiveRangeFrom, 'start');
-      const toStr = formatDateForAPI(effectiveRangeTo, 'end');
+      const fromStr = formatDateForAPI(rangeFrom, 'start');
+      const toStr = formatDateForAPI(rangeTo, 'end');
 
       log(`[Date Debug] API Request: User ${user}, Device ${device}`);
       log(`[Date Debug] Requested local range: ${range.from} to ${range.to}`);
-      log(`[Date Debug] Local date objects: ${effectiveRangeFrom.toLocaleString()} to ${effectiveRangeTo.toLocaleString()}`);
+      log(`[Date Debug] Local date objects: ${rangeFrom.toLocaleString()} to ${rangeTo.toLocaleString()}`);
       log(`[Date Debug] UTC for API: from=${fromStr}, to=${toStr}`);
 
       const locationsUrl = `${window.CONFIG.api.url}/api/0/locations?` +
@@ -2638,19 +2668,6 @@
       });
     },
 
-    // Get latest cached timestamp for a set of days
-    async getLatestCachedTimestamp(user, device, days) {
-      const data = await this.getCachedData(user, device, days);
-      if (!data.length) return null;
-      // Loop rather than Math.max(...spread) - a large spread exceeds the argument limit
-      let latest = 0;
-      for (const point of data) {
-        const tst = Number(point.tst) || 0;
-        if (tst > latest) latest = tst;
-      }
-      return latest;
-    },
-
     // Clear all cache data for all users/devices
     async clearAllCache() {
       const db = await this.open();
@@ -2780,16 +2797,6 @@
       await idbHelper.updateCacheIndex(user, device, newDays);
     } catch (e) {
       logWarn('Failed to update cache index:', e);
-    }
-  }
-
-  // Get latest cached timestamp (now uses IndexedDB)
-  async function getLatestCachedTimestamp(user, device, days) {
-    try {
-      return await idbHelper.getLatestCachedTimestamp(user, device, days);
-    } catch (e) {
-      logWarn('Failed to get latest cached timestamp:', e);
-      return null;
     }
   }
 
