@@ -1281,7 +1281,10 @@ body:not(.ui-ready) .sub-section-content {
 }
 
 /* Dark Mode Map Filter */
-.dark-mode .leaflet-layer,
+/* :not() keeps the heatmap canvas out of the filter - leaflet.heat gives
+   its canvas the generic leaflet-layer class too, and inverting it would
+   recolor the configured heat gradient */
+.dark-mode .leaflet-layer:not(.leaflet-heatmap-layer),
 .dark-mode .leaflet-control-zoom-in,
 .dark-mode .leaflet-control-zoom-out,
 .dark-mode .leaflet-control-attribution {
