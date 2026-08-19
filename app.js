@@ -1320,6 +1320,12 @@
       return;
     }
 
+    // Don't save positions caused by programmatic moves (initial view,
+    // restore, fit-to-bounds) - only genuine user interaction should persist
+    if (state.suppressMapSave) {
+      return;
+    }
+
     const center = state.map.getCenter();
     const zoom = state.map.getZoom();
 
@@ -1327,12 +1333,28 @@
     saveSetting('mapZoom', zoom, null);
   }
 
+  /**
+   * Run a programmatic map view change (setView/fitBounds) without it being
+   * persisted as a user map position. moveend can fire asynchronously when
+   * Leaflet animates, so the flag is cleared on the next tick.
+   */
+  function applyProgrammaticMapView(fn) {
+    state.suppressMapSave = true;
+    try {
+      fn();
+    } finally {
+      setTimeout(() => { state.suppressMapSave = false; }, 250);
+    }
+  }
+
   function restoreMapPosition() {
     const savedCenter = getSetting('mapCenter', null);
     const savedZoom = getSetting('mapZoom', null);
 
     if (savedCenter && savedZoom !== null) {
-      state.map.setView([savedCenter.lat, savedCenter.lng], savedZoom);
+      applyProgrammaticMapView(() => {
+        state.map.setView([savedCenter.lat, savedCenter.lng], savedZoom);
+      });
     }
   }
 
@@ -1979,7 +2001,8 @@
       }
 
       userSelect.value = userToSelect;
-      saveSetting('selectedUser', userToSelect, '');
+      // No saveSetting here: the selection is only persisted when the user
+      // explicitly changes it, so config/only-user defaults stay live
 
       // Populate the device dropdown for whichever user is now selected
       await updateDeviceSelect();
@@ -2128,7 +2151,7 @@
         }
 
         deviceSelect.value = deviceToSelect;
-        saveSetting('selectedDevice', deviceToSelect, '');
+        // No saveSetting here: only explicit user changes are persisted
 
         // Auto-load only for a single specific user/device pair, and only when
         // it already has cached data. "All Users"/"All Devices" selections stay
@@ -3376,9 +3399,11 @@
       leftPadding = sidebar.offsetWidth + 20; // Full sidebar width plus small buffer
     }
 
-    state.map.fitBounds(bounds, {
-      paddingTopLeft: [leftPadding, basePadding],
-      paddingBottomRight: [basePadding, basePadding]
+    applyProgrammaticMapView(() => {
+      state.map.fitBounds(bounds, {
+        paddingTopLeft: [leftPadding, basePadding],
+        paddingBottomRight: [basePadding, basePadding]
+      });
     });
   }
 
