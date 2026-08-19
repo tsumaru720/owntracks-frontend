@@ -45,6 +45,14 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+  <!-- Shared reset icon for .setting-reset buttons (referenced via <use>) -->
+  <svg style="display:none" aria-hidden="true">
+    <symbol id="reset-icon" viewBox="0 0 24 24">
+      <polyline points="1 4 1 10 7 10" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+  </svg>
+
   <!-- Header -->
   <header class="header">
     <button class="header-toggle" id="sidebarToggle" aria-label="Toggle sidebar">☰</button>
@@ -125,7 +133,10 @@
 
         <div class="display-option-group">
         <div class="form-group">
-          <label for="pointColor">Point Color</label>
+          <div class="setting-header-row">
+            <label for="pointColor">Point Color</label>
+            <button type="button" class="setting-reset" data-reset-setting="pointColor" data-reset-default="#3388ff" title="Reset to default" aria-label="Reset point color to default"><svg width="12" height="12" aria-hidden="true"><use href="#reset-icon"/></svg></button>
+          </div>
           <div class="color-input-group">
             <input type="color" id="pointColorPicker" value="#3388ff">
             <input type="text" id="pointColor" value="#3388ff">
@@ -133,19 +144,28 @@
         </div>
 
         <div class="form-group">
-          <label for="pointSize">Point Size</label>
+          <div class="setting-header-row">
+            <label for="pointSize">Point Size</label>
+            <button type="button" class="setting-reset" data-reset-setting="pointSize" data-reset-default="2" title="Reset to default" aria-label="Reset point size to default"><svg width="12" height="12" aria-hidden="true"><use href="#reset-icon"/></svg></button>
+          </div>
           <input type="number" id="pointSize" value="2" min="1" max="50">
         </div>
 
         <div class="form-group">
-          <label for="pointOpacity">Point Opacity</label>
+          <div class="setting-header-row">
+            <label for="pointOpacity">Point Opacity</label>
+            <button type="button" class="setting-reset" data-reset-setting="pointOpacity" data-reset-default="0.5" title="Reset to default" aria-label="Reset point opacity to default"><svg width="12" height="12" aria-hidden="true"><use href="#reset-icon"/></svg></button>
+          </div>
           <input type="number" id="pointOpacity" value="0.5" min="0" max="1" step="0.1">
         </div>
         </div>
 
         <div class="display-option-group">
         <div class="form-group">
-          <label for="lineColor">Line Color</label>
+          <div class="setting-header-row">
+            <label for="lineColor">Line Color</label>
+            <button type="button" class="setting-reset" data-reset-setting="lineColor" data-reset-default="#3388ff" title="Reset to default" aria-label="Reset line color to default"><svg width="12" height="12" aria-hidden="true"><use href="#reset-icon"/></svg></button>
+          </div>
           <div class="color-input-group">
             <input type="color" id="lineColorPicker" value="#3388ff">
             <input type="text" id="lineColor" value="#3388ff">
@@ -153,34 +173,99 @@
         </div>
 
         <div class="form-group">
-          <label for="lineWidth">Line Width</label>
+          <div class="setting-header-row">
+            <label for="lineWidth">Line Width</label>
+            <button type="button" class="setting-reset" data-reset-setting="lineWidth" data-reset-default="3" title="Reset to default" aria-label="Reset line width to default"><svg width="12" height="12" aria-hidden="true"><use href="#reset-icon"/></svg></button>
+          </div>
           <input type="number" id="lineWidth" value="3" min="1" max="20">
         </div>
 
         <div class="form-group">
-          <label for="lineOpacity">Line Opacity</label>
+          <div class="setting-header-row">
+            <label for="lineOpacity">Line Opacity</label>
+            <button type="button" class="setting-reset" data-reset-setting="lineOpacity" data-reset-default="0.7" title="Reset to default" aria-label="Reset line opacity to default"><svg width="12" height="12" aria-hidden="true"><use href="#reset-icon"/></svg></button>
+          </div>
           <input type="number" id="lineOpacity" value="0.7" min="0" max="1" step="0.1">
         </div>
         </div>
 
         <div class="display-option-group">
         <div class="form-group">
-          <label for="heatmapRadius">Heatmap Radius</label>
+          <div class="setting-header-row">
+            <label for="heatmapRadius">Heatmap Radius</label>
+            <button type="button" class="setting-reset" data-reset-setting="heatmapRadius" data-reset-default="25" title="Reset to default" aria-label="Reset heatmap radius to default"><svg width="12" height="12" aria-hidden="true"><use href="#reset-icon"/></svg></button>
+          </div>
           <input type="number" id="heatmapRadius" value="25" min="5" max="100">
         </div>
 
         <div class="form-group">
-          <label for="heatmapBlur">Heatmap Blur</label>
+          <div class="setting-header-row">
+            <label for="heatmapBlur">Heatmap Blur</label>
+            <button type="button" class="setting-reset" data-reset-setting="heatmapBlur" data-reset-default="15" title="Reset to default" aria-label="Reset heatmap blur to default"><svg width="12" height="12" aria-hidden="true"><use href="#reset-icon"/></svg></button>
+          </div>
           <input type="number" id="heatmapBlur" value="15" min="5" max="50">
         </div>
 
         <div class="form-group">
-          <label for="heatmapMinOpacity">Heatmap Min Opacity</label>
+          <div class="setting-header-row">
+            <label for="heatmapMinOpacity">Heatmap Min Opacity</label>
+            <button type="button" class="setting-reset" data-reset-setting="heatmapMinOpacity" data-reset-default="0.05" title="Reset to default" aria-label="Reset heatmap min opacity to default"><svg width="12" height="12" aria-hidden="true"><use href="#reset-icon"/></svg></button>
+          </div>
           <input type="number" id="heatmapMinOpacity" value="0.05" min="0" max="1" step="0.01">
         </div>
 
         <div class="form-group">
-          <label for="heatmapLowColor">Heatmap Low Density Color</label>
+          <div class="setting-header-row">
+            <label for="heatmapMax">Heatmap Saturation Threshold</label>
+            <button type="button" class="setting-reset" data-reset-setting="heatmapMax" data-reset-default="20" title="Reset to default" aria-label="Reset heatmap saturation threshold to default"><svg width="12" height="12" aria-hidden="true"><use href="#reset-icon"/></svg></button>
+          </div>
+          <input type="number" id="heatmapMax" value="20" min="1" max="500" step="1">
+        </div>
+
+        <small class="setting-hint snug">
+          Overlapping points needed to reach the hottest colour - lower is hotter, higher is softer.
+        </small>
+
+        <div class="form-group">
+          <div class="setting-header-row">
+            <label for="heatmapGradientMidStop">Mid Colour Stop: <span id="heatmapGradientMidStopValue">0.6</span></label>
+            <button type="button" class="setting-reset" data-reset-setting="heatmapGradientMidStop" data-reset-default="0.6" title="Reset to default" aria-label="Reset mid colour stop to default"><svg width="12" height="12" aria-hidden="true"><use href="#reset-icon"/></svg></button>
+          </div>
+          <div class="slider-container">
+            <input type="range" id="heatmapGradientMidStop" min="0.1" max="0.9" step="0.05" value="0.6">
+          </div>
+        </div>
+
+        <small class="setting-hint snug">
+          Where the medium colour sits between low and high - higher keeps areas in the low colour longer before ramping towards the hottest.
+        </small>
+
+        <div class="form-group">
+          <div class="setting-header-row">
+            <label for="heatmapMaxZoom">Heatmap Decay Zoom</label>
+            <button type="button" class="setting-reset" data-reset-setting="heatmapMaxZoom" data-reset-default="18" title="Reset to default" aria-label="Reset heatmap decay zoom to default"><svg width="12" height="12" aria-hidden="true"><use href="#reset-icon"/></svg></button>
+          </div>
+          <input type="number" id="heatmapMaxZoom" value="18" min="1" max="21" step="1">
+        </div>
+
+        <small class="setting-hint snug">
+          Points reach full intensity at this zoom; each zoom level below it halves their heat. Lower values keep more warmth visible when zoomed far out.
+        </small>
+
+        <div class="form-group checkbox-group">
+          <input type="checkbox" id="heatmapZoomScaling">
+          <label for="heatmapZoomScaling">Zoom-adjusted blob size</label>
+        </div>
+
+        <small class="setting-hint snug">
+          Shrinks blobs when zoomed out so separate hotspots stay distinct, and tightens them slightly when zoomed in. Off applies the radius/blur values as-is at every zoom.
+        </small>
+
+        <div class="form-group">
+          <div class="setting-header-row">
+            <label for="heatmapLowColor">Heatmap Low Density Color</label>
+            <button type="button" class="setting-reset" data-reset-setting="heatmapLowColor" data-reset-default="#0000ff" title="Reset to default" aria-label="Reset heatmap low density color to default"><svg width="12" height="12" aria-hidden="true"><use href="#reset-icon"/></svg></button>
+          </div>
           <div class="color-input-group">
             <input type="color" id="heatmapLowColorPicker" value="#0000ff">
             <input type="text" id="heatmapLowColor" value="#0000ff">
@@ -188,7 +273,10 @@
         </div>
 
         <div class="form-group">
-          <label for="heatmapMidColor">Heatmap Medium Density Color</label>
+          <div class="setting-header-row">
+            <label for="heatmapMidColor">Heatmap Medium Density Color</label>
+            <button type="button" class="setting-reset" data-reset-setting="heatmapMidColor" data-reset-default="#00ffff" title="Reset to default" aria-label="Reset heatmap medium density color to default"><svg width="12" height="12" aria-hidden="true"><use href="#reset-icon"/></svg></button>
+          </div>
           <div class="color-input-group">
             <input type="color" id="heatmapMidColorPicker" value="#00ffff">
             <input type="text" id="heatmapMidColor" value="#00ffff">
@@ -196,7 +284,32 @@
         </div>
 
         <div class="form-group">
-          <label for="heatmapHighColor">Heatmap High Density Color</label>
+          <div class="setting-header-row">
+            <label for="heatmapMidHighColor1">Heatmap Mid-High Color 1</label>
+            <button type="button" class="setting-reset" data-reset-setting="heatmapMidHighColor1" data-reset-default="#00ff00" title="Reset to default" aria-label="Reset heatmap mid-high color 1 to default"><svg width="12" height="12" aria-hidden="true"><use href="#reset-icon"/></svg></button>
+          </div>
+          <div class="color-input-group">
+            <input type="color" id="heatmapMidHighColor1Picker" value="#00ff00">
+            <input type="text" id="heatmapMidHighColor1" value="#00ff00">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <div class="setting-header-row">
+            <label for="heatmapMidHighColor2">Heatmap Mid-High Color 2</label>
+            <button type="button" class="setting-reset" data-reset-setting="heatmapMidHighColor2" data-reset-default="#ffff00" title="Reset to default" aria-label="Reset heatmap mid-high color 2 to default"><svg width="12" height="12" aria-hidden="true"><use href="#reset-icon"/></svg></button>
+          </div>
+          <div class="color-input-group">
+            <input type="color" id="heatmapMidHighColor2Picker" value="#ffff00">
+            <input type="text" id="heatmapMidHighColor2" value="#ffff00">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <div class="setting-header-row">
+            <label for="heatmapHighColor">Heatmap High Density Color</label>
+            <button type="button" class="setting-reset" data-reset-setting="heatmapHighColor" data-reset-default="#ff0000" title="Reset to default" aria-label="Reset heatmap high density color to default"><svg width="12" height="12" aria-hidden="true"><use href="#reset-icon"/></svg></button>
+          </div>
           <div class="color-input-group">
             <input type="color" id="heatmapHighColorPicker" value="#ff0000">
             <input type="text" id="heatmapHighColor" value="#ff0000">

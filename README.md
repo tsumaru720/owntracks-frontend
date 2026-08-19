@@ -129,9 +129,14 @@ It is recommended to view this document directly as the table is too wide for th
 | `APP_DISPLAY_HEATMAP_RADIUS` | `display.heatmap.radius` | Heatmap radius | No | `25` |
 | `APP_DISPLAY_HEATMAP_BLUR` | `display.heatmap.blur` | Heatmap blur | No | `15` |
 | `APP_DISPLAY_HEATMAP_MINOPACITY` | `display.heatmap.minOpacity` | Heatmap min opacity | No | `0.05` |
+| `APP_DISPLAY_HEATMAP_MAX` | `display.heatmap.max` | Heatmap saturation threshold (points to hottest colour) | No | `20` |
 | `APP_DISPLAY_HEATMAP_MAXZOOM` | `display.heatmap.maxZoom` | Max zoom for heatmap | No | `18` |
+| `APP_DISPLAY_HEATMAP_ZOOMSCALING` | `display.heatmap.zoomScaling` | Zoom-adjusted blob size | No | `false` |
+| `APP_DISPLAY_HEATMAP_GRADIENT_MIDSTOP` | `display.heatmap.gradient.midStop` | Position of the medium color in the ramp (0.1-0.9) | No | `0.6` |
 | `APP_DISPLAY_HEATMAP_GRADIENT_LOWCOLOR` | `display.heatmap.gradient.lowColor` | Heatmap low color | No | `#0000ff` |
 | `APP_DISPLAY_HEATMAP_GRADIENT_MIDCOLOR` | `display.heatmap.gradient.midColor` | Heatmap mid color | No | `#00ffff` |
+| `APP_DISPLAY_HEATMAP_GRADIENT_MIDHIGHCOLOR1` | `display.heatmap.gradient.midHighColor1` | Heatmap mid-high color 1 | No | `#00ff00` |
+| `APP_DISPLAY_HEATMAP_GRADIENT_MIDHIGHCOLOR2` | `display.heatmap.gradient.midHighColor2` | Heatmap mid-high color 2 | No | `#ffff00` |
 | `APP_DISPLAY_HEATMAP_GRADIENT_HIGHCOLOR` | `display.heatmap.gradient.highColor` | Heatmap high color | No | `#ff0000` |
 | `APP_DISPLAY_STORAGEENABLED` | `display.storageEnabled` | Cache data in browser | No | `true` |
 | `APP_DEBUG_CONSOLELOGGING` | `debug.consoleLogging` | Enable console logging | No | `false` |

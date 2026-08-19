@@ -59,10 +59,15 @@ jq -n '
     "APP_DISPLAY_HEATMAP_RADIUS": ["display", "heatmap", "radius"],
     "APP_DISPLAY_HEATMAP_BLUR": ["display", "heatmap", "blur"],
     "APP_DISPLAY_HEATMAP_MINOPACITY": ["display", "heatmap", "minOpacity"],
+    "APP_DISPLAY_HEATMAP_MAX": ["display", "heatmap", "max"],
     "APP_DISPLAY_HEATMAP_MAXZOOM": ["display", "heatmap", "maxZoom"],
+    "APP_DISPLAY_HEATMAP_ZOOMSCALING": ["display", "heatmap", "zoomScaling"],
 
+    "APP_DISPLAY_HEATMAP_GRADIENT_MIDSTOP": ["display", "heatmap", "gradient", "midStop"],
     "APP_DISPLAY_HEATMAP_GRADIENT_LOWCOLOR": ["display", "heatmap", "gradient", "lowColor"],
     "APP_DISPLAY_HEATMAP_GRADIENT_MIDCOLOR": ["display", "heatmap", "gradient", "midColor"],
+    "APP_DISPLAY_HEATMAP_GRADIENT_MIDHIGHCOLOR1": ["display", "heatmap", "gradient", "midHighColor1"],
+    "APP_DISPLAY_HEATMAP_GRADIENT_MIDHIGHCOLOR2": ["display", "heatmap", "gradient", "midHighColor2"],
     "APP_DISPLAY_HEATMAP_GRADIENT_HIGHCOLOR": ["display", "heatmap", "gradient", "highColor"],
 
     "APP_DISPLAY_STORAGEENABLED": ["display", "storageEnabled"],

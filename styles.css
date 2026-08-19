@@ -860,6 +860,56 @@ body:not(.ui-ready) .sub-section-content {
   cursor: pointer;
 }
 
+/* Setting header with an inline reset button - sits on the label row so
+   sliders can be reverted to their default after experimenting */
+.setting-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 5px;
+}
+
+.setting-header-row label {
+  margin-bottom: 0;
+}
+
+.setting-reset {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border: 1px solid;
+  border-radius: 50%;
+  background-color: transparent;
+  color: inherit;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.6;
+}
+
+.setting-reset svg {
+  display: block;
+}
+
+.setting-reset:hover {
+  opacity: 1;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.light-mode .setting-reset {
+  border-color: var(--border-light);
+}
+
+.dark-mode .setting-reset {
+  border-color: var(--border-dark);
+}
+
 /* Color Picker */
 .color-input-group {
   display: flex;

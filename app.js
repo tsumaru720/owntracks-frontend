@@ -277,10 +277,15 @@
     'heatmapRadius': 'display.heatmap.radius',
     'heatmapBlur': 'display.heatmap.blur',
     'heatmapMinOpacity': 'display.heatmap.minOpacity',
+    'heatmapGradientMidStop': 'display.heatmap.gradient.midStop',
     'heatmapLowColor': 'display.heatmap.gradient.lowColor',
     'heatmapMidColor': 'display.heatmap.gradient.midColor',
+    'heatmapMidHighColor1': 'display.heatmap.gradient.midHighColor1',
+    'heatmapMidHighColor2': 'display.heatmap.gradient.midHighColor2',
     'heatmapHighColor': 'display.heatmap.gradient.highColor',
+    'heatmapMax': 'display.heatmap.max',
     'heatmapMaxZoom': 'display.heatmap.maxZoom',
+    'heatmapZoomScaling': 'display.heatmap.zoomScaling',
     // Storage
     'storageEnabled': 'display.storageEnabled'
   };
@@ -322,6 +327,23 @@
   // ============================================================================
   // Map Initialization
   // ============================================================================
+
+  // simpleheat (bundled in leaflet-heat) colorises with a full-canvas
+  // getImageData/putImageData on every redraw - each pan/zoom end - but
+  // acquires the canvas context without willReadFrequently, so Chrome
+  // performs slow GPU readbacks and logs a warning per canvas. Prime the
+  // context with the readback hint before the plugin's constructor
+  // acquires it; its later plain getContext('2d') returns the same,
+  // already-hinted context.
+  const originalSimpleheat = window.simpleheat;
+  if (typeof originalSimpleheat === 'function') {
+    window.simpleheat = function (canvas) {
+      if (canvas instanceof HTMLCanvasElement) {
+        canvas.getContext('2d', { willReadFrequently: true });
+      }
+      return originalSimpleheat(canvas);
+    };
+  }
 
   // Default map settings (used if not in config)
   const DEFAULT_MAP_SETTINGS = {
@@ -896,8 +918,45 @@
     bindSettingInput('heatmapRadius', 25, parseInt);
     bindSettingInput('heatmapBlur', 15, parseInt);
     bindSettingInput('heatmapMinOpacity', 0.05);
+    bindSettingInput('heatmapMax', 20, parseInt);
+    bindSettingInput('heatmapMaxZoom', 18, parseInt);
+    bindSettingCheckbox('heatmapZoomScaling', false);
+
+    // Mid-stop slider: the label tracks the thumb live, the heatmap
+    // rebuild is debounced while dragging and flushed on release
+    const midStopRedraw = debounce(redrawMap, 200);
+    document.getElementById('heatmapGradientMidStop').addEventListener('input', (e) => {
+      document.getElementById('heatmapGradientMidStopValue').textContent = e.target.value;
+      saveSetting('heatmapGradientMidStop', parseFloat(e.target.value), 0.6);
+      midStopRedraw();
+    });
+    document.getElementById('heatmapGradientMidStop').addEventListener('change', () => midStopRedraw.flush());
+
+    // Reset buttons (data-reset-setting / data-reset-default): clear the
+    // saved override so the config/env/default chain applies again, then
+    // sync the input (plus colour picker / label span, if any) and redraw.
+    // Defaults are numeric except colour hex strings
+    document.querySelectorAll('.setting-reset').forEach((button) => {
+      button.addEventListener('click', () => {
+        const id = button.dataset.resetSetting;
+        const raw = button.dataset.resetDefault;
+        if (!id || raw === undefined) return;
+        const def = /^-?\d+(\.\d+)?$/.test(raw) ? parseFloat(raw) : raw;
+        saveSetting(id, def, def); // value === default clears the override
+        const value = getSetting(id, def);
+        document.getElementById(id).value = value;
+        const picker = document.getElementById(id + 'Picker');
+        if (picker) picker.value = value;
+        const valueLabel = document.getElementById(id + 'Value');
+        if (valueLabel) valueLabel.textContent = value;
+        redrawMap();
+      });
+    });
+
     bindSettingColor('heatmapLowColor', '#0000ff');
     bindSettingColor('heatmapMidColor', '#00ffff');
+    bindSettingColor('heatmapMidHighColor1', '#00ff00');
+    bindSettingColor('heatmapMidHighColor2', '#ffff00');
     bindSettingColor('heatmapHighColor', '#ff0000');
 
     // Storage (refresh button state depends on the cache)
@@ -1047,11 +1106,18 @@
       ['altitudeMax', 1000],
       ['heatmapRadius', 25],
       ['heatmapBlur', 15],
-      ['heatmapMinOpacity', 0.05]
+      ['heatmapMinOpacity', 0.05],
+      ['heatmapMax', 20],
+      ['heatmapMaxZoom', 18]
     ];
     valueInputs.forEach(([id, def]) => {
       document.getElementById(id).value = getSetting(id, def);
     });
+
+    // Range sliders also mirror their value into the label span
+    const midStop = getSetting('heatmapGradientMidStop', 0.6);
+    document.getElementById('heatmapGradientMidStop').value = midStop;
+    document.getElementById('heatmapGradientMidStopValue').textContent = midStop;
 
     // Colour pairs: the picker input shares the setting id + "Picker"
     const colorInputs = {
@@ -1063,6 +1129,8 @@
       altitudeLinesHighColor: '#ff0000',
       heatmapLowColor: '#0000ff',
       heatmapMidColor: '#00ffff',
+      heatmapMidHighColor1: '#00ff00',
+      heatmapMidHighColor2: '#ffff00',
       heatmapHighColor: '#ff0000'
     };
     Object.entries(colorInputs).forEach(([id, def]) => {
@@ -1075,6 +1143,7 @@
     const checkboxes = [
       ['altitudeEnabled', false],
       ['altitudeLinesEnabled', false],
+      ['heatmapZoomScaling', false],
       ['storageEnabled', true],
       ['autoFitToBounds', true],
       ['consoleLoggingEnabled', false]
@@ -2795,11 +2864,19 @@
   // Map Rendering
   // ============================================================================
 
-  function buildHeatmapGradient(lowColor, midColor, highColor) {
-    // Build gradient object from the three color stops
+  function buildHeatmapGradient(lowColor, midColor, midHigh1Color, midHigh2Color, highColor) {
+    // Five stops mirror simpleheat's built-in ramp - what the official
+    // OwnTracks frontend renders with. The two mid-high stops sit evenly
+    // between the mid stop and 1.0 (default 0.6 puts them at ~0.73/0.87);
+    // short adjacent segments make the ramp pass through green and yellow
+    // instead of a muddy blue-to-red blend
+    const midStop = getSetting('heatmapGradientMidStop', 0.6);
+    const span = (1 - midStop) / 3;
     return {
       0.0: lowColor,
-      0.5: midColor,
+      [midStop]: midColor,
+      [Number((midStop + span).toFixed(3))]: midHigh1Color,
+      [Number((midStop + span * 2).toFixed(3))]: midHigh2Color,
       1.0: highColor
     };
   }
@@ -3137,11 +3214,14 @@
   function drawHeatmap(points) {
     removeHeatmap();
 
+    // Every point carries weight 1, matching the official frontend:
+    // frequently visited places and often-driven routes accumulate
+    // intensity naturally, one-off noise stays cold
     const heatmapData = [];
     for (let i = 0; i < points.length; i++) {
       const p = points[i];
       if (p.lat && p.lon) {
-        heatmapData.push([p.lat, p.lon, 0.5]);
+        heatmapData.push([p.lat, p.lon, 1]);
       }
     }
     if (heatmapData.length === 0) return;
@@ -3151,28 +3231,40 @@
     const baseRadius = getSetting('heatmapRadius', 25);
     const baseBlur = getSetting('heatmapBlur', 15);
 
-    // Adjust radius/blur by zoom: more detail when close, more coverage when far
+    // Adjust radius/blur by zoom, unless disabled in settings. The radius
+    // is in screen pixels, so when zoomed far out one blob spans tens of
+    // km and every hotspot merges into a single mass - shrink it so
+    // distinct spots (home, work, regular stops) stay readable. Tighten a
+    // little when close so the heat concentrates on routes instead of
+    // flooding around them.
     let zoomAdjustedRadius = baseRadius;
     let zoomAdjustedBlur = baseBlur;
 
-    if (zoom < 8) {
-      // Far zoom - increase radius and blur for better coverage
-      zoomAdjustedRadius = baseRadius * 1.5;
-      zoomAdjustedBlur = baseBlur * 1.3;
-    } else if (zoom > 14) {
-      // Close zoom - decrease radius and blur for more detail
-      zoomAdjustedRadius = baseRadius * 0.7;
-      zoomAdjustedBlur = baseBlur * 0.8;
+    if (getSetting('heatmapZoomScaling', false)) {
+      if (zoom < 8) {
+        zoomAdjustedRadius = baseRadius * 0.6;
+        zoomAdjustedBlur = baseBlur * 0.9;
+      } else if (zoom > 14) {
+        zoomAdjustedRadius = baseRadius * 0.7;
+        zoomAdjustedBlur = baseBlur * 0.8;
+      }
     }
 
     state.layers.heatmap = L.heatLayer(heatmapData, {
       radius: zoomAdjustedRadius,
       blur: zoomAdjustedBlur,
       minOpacity: getSetting('heatmapMinOpacity', 0.05),
+      // Saturation threshold: overlapping points needed to reach the
+      // hottest colour. Leaflet.heat's default of 1 saturates instantly,
+      // which is what turns a whole country solid red - 20 matches the
+      // official frontend
+      max: getSetting('heatmapMax', 20),
       maxZoom: getSetting('heatmapMaxZoom', 18), // Limit max zoom for heatmap performance
       gradient: buildHeatmapGradient(
         getSetting('heatmapLowColor', '#0000ff'),
         getSetting('heatmapMidColor', '#00ffff'),
+        getSetting('heatmapMidHighColor1', '#00ff00'),
+        getSetting('heatmapMidHighColor2', '#ffff00'),
         getSetting('heatmapHighColor', '#ff0000')
       ),
       zIndex: 200 // Bottom layer

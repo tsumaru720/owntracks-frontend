@@ -51,10 +51,15 @@
       "radius": 25,
       "blur": 15,
       "minOpacity": 0.05,
+      "max": 20,
       "maxZoom": 18,
+      "zoomScaling": false,
       "gradient": {
+        "midStop": 0.6,
         "lowColor": "#0000ff",
         "midColor": "#00ffff",
+        "midHighColor1": "#00ff00",
+        "midHighColor2": "#ffff00",
         "highColor": "#ff0000"
       }
     },
