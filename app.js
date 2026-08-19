@@ -1990,6 +1990,7 @@
   }
 
   async function fetchUsersAndDevices() {
+    clearHeaderError();
     try {
       showLoading('Loading users...');
 
@@ -2064,7 +2065,7 @@
       showLoadingError('Failed to load users: ' + error.message);
       setTimeout(() => {
         hideLoading();
-        showError('Failed to load users: ' + error.message);
+        updateHeaderStatus('Failed to load users: ' + error.message, true);
       }, 3000);
     }
   }
@@ -2098,6 +2099,7 @@
    * fetched so "Load Data" can enumerate all user/device combinations.
    */
   async function updateDeviceSelect() {
+    clearHeaderError();
     const userSelect = document.getElementById('userSelect');
     const deviceSelect = document.getElementById('deviceSelect');
     const deviceGroup = document.getElementById('deviceFormGroup');
@@ -2219,7 +2221,7 @@
       showLoadingError('Failed to load devices: ' + error.message);
       setTimeout(() => {
         hideLoading();
-        showError('Failed to load devices: ' + error.message);
+        updateHeaderStatus('Failed to load devices: ' + error.message, true);
       }, 3000);
     }
   }
@@ -2378,6 +2380,7 @@
   }
 
   async function loadData() {
+    clearHeaderError();
     const userSel = document.getElementById('userSelect').value;
     const deviceSel = document.getElementById('deviceSelect').value;
 
@@ -2510,7 +2513,7 @@
       setTimeout(() => {
         hideLoading();
         clearMapData();
-        showError('Failed to load locations: ' + error.message);
+        updateHeaderStatus('Failed to load locations: ' + error.message, true);
       }, 3000);
     }
   }
@@ -3570,8 +3573,20 @@
     console.error(message);
   }
 
-  function updateHeaderStatus(text) {
-    document.getElementById('headerStatus').textContent = text;
+  function updateHeaderStatus(text, isError = false) {
+    const el = document.getElementById('headerStatus');
+    el.textContent = text;
+    el.classList.toggle('error', isError);
+  }
+
+  // Clear a stale error before a new API attempt; other status messages
+  // (e.g. cache warnings) are left alone
+  function clearHeaderError() {
+    const el = document.getElementById('headerStatus');
+    if (el.classList.contains('error')) {
+      el.textContent = '';
+      el.classList.remove('error');
+    }
   }
 
   function updateStats() {
@@ -3720,6 +3735,7 @@
   }
 
   async function loadDataFromAPI() {
+    clearHeaderError();
     const userSel = document.getElementById('userSelect').value;
     const deviceSel = document.getElementById('deviceSelect').value;
 
@@ -3796,7 +3812,7 @@
       setTimeout(() => {
         hideLoading();
         clearMapData();
-        showError('Failed to load locations: ' + error.message);
+        updateHeaderStatus('Failed to load locations: ' + error.message, true);
       }, 3000);
     }
   }

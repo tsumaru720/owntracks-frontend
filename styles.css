@@ -146,9 +146,39 @@ html.dark-mode {
 }
 
 .header-status {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
   font-size: 13px;
   color: inherit;
   opacity: 0.7;
+  max-width: 60%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.header-status.error {
+  opacity: 1;
+  background-color: rgba(220, 53, 69, 0.9);
+  color: #fff;
+  padding: 4px 12px;
+  line-height: 1;
+  border-radius: 4px;
+  /* Pin the top edge (21px tall: 13px line + 8px padding) so the hover
+     expansion grows downward over the map instead of re-centering */
+  transform: translate(-50%, -10.5px);
+}
+
+.header-status.error:hover {
+  white-space: normal;
+  max-width: 480px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.header-status.error:empty {
+  display: none;
 }
 
 /* Sidebar */
