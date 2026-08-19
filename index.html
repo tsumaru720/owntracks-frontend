@@ -106,10 +106,6 @@
           <button class="btn btn-primary btn-block" id="loadDataBtn">Load Data</button>
           <button class="btn btn-secondary btn-block" id="refreshBtn" style="display: none;">Refresh from API</button>
         </div>
-
-        <div class="btn-group" style="margin-top: 8px;">
-          <button class="btn btn-secondary btn-block" id="recenterBtn" style="display: none;">Recenter Map</button>
-        </div>
       </div>
     </div>
 
@@ -124,133 +120,94 @@
           <input type="checkbox" id="autoFitToBounds" checked>
           <label for="autoFitToBounds">Auto-fit to Data</label>
         </div>
-        <small style="opacity: 0.7; display: block; margin-top: -8px; margin-bottom: 10px;">
+        <small style="opacity: 0.7; display: block; margin-top: -8px; margin-bottom: 30px;">
           Automatically zoom and pan map to show all loaded data points.
         </small>
 
-        <div class="toggle-config-group">
-          <div class="checkbox-group form-group">
-            <input type="checkbox" id="showPoints" checked>
-            <label for="showPoints">Show Points</label>
-          </div>
-
-          <div class="sub-section">
-            <div class="sub-section-header" data-sub="pointStyling">
-              <span class="sub-section-icon">▶</span>
-              Point Styling
-            </div>
-            <div class="sub-section-content">
-              <div class="form-group">
-                <label for="pointColor">Point Color</label>
-                <div class="color-input-group">
-                  <input type="color" id="pointColorPicker" value="#3388ff">
-                  <input type="text" id="pointColor" value="#3388ff">
-                </div>
-              </div>
-
-              <div class="form-group">
-                <label for="pointSize">Point Size</label>
-                <input type="number" id="pointSize" value="2" min="1" max="50">
-              </div>
-
-              <div class="form-group">
-                <label for="pointOpacity">Opacity</label>
-                <input type="number" id="pointOpacity" value="0.5" min="0" max="1" step="0.1">
-              </div>
-            </div>
+        <div class="display-option-group">
+        <div class="form-group">
+          <label for="pointColor">Point Color</label>
+          <div class="color-input-group">
+            <input type="color" id="pointColorPicker" value="#3388ff">
+            <input type="text" id="pointColor" value="#3388ff">
           </div>
         </div>
 
-        <div class="toggle-config-group">
-          <div class="checkbox-group form-group">
-            <input type="checkbox" id="showLines" checked>
-            <label for="showLines">Show Route Lines</label>
-          </div>
+        <div class="form-group">
+          <label for="pointSize">Point Size</label>
+          <input type="number" id="pointSize" value="2" min="1" max="50">
+        </div>
 
-          <div class="sub-section">
-            <div class="sub-section-header" data-sub="lineStyling">
-              <span class="sub-section-icon">▶</span>
-              Line Styling
-            </div>
-            <div class="sub-section-content">
-              <div class="form-group">
-                <label for="lineColor">Line Color</label>
-                <div class="color-input-group">
-                  <input type="color" id="lineColorPicker" value="#3388ff">
-                  <input type="text" id="lineColor" value="#3388ff">
-                </div>
-              </div>
+        <div class="form-group">
+          <label for="pointOpacity">Point Opacity</label>
+          <input type="number" id="pointOpacity" value="0.5" min="0" max="1" step="0.1">
+        </div>
+        </div>
 
-              <div class="form-group">
-                <label for="lineWidth">Line Width</label>
-                <input type="number" id="lineWidth" value="3" min="1" max="20">
-              </div>
-
-              <div class="form-group">
-                <label for="lineOpacity">Opacity</label>
-                <input type="number" id="lineOpacity" value="0.7" min="0" max="1" step="0.1">
-              </div>
-
-              <div class="checkbox-group form-group">
-                <input type="checkbox" id="smoothLines">
-                <label for="smoothLines">Smooth Lines</label>
-              </div>
-            </div>
+        <div class="display-option-group">
+        <div class="form-group">
+          <label for="lineColor">Line Color</label>
+          <div class="color-input-group">
+            <input type="color" id="lineColorPicker" value="#3388ff">
+            <input type="text" id="lineColor" value="#3388ff">
           </div>
         </div>
 
-        <div class="toggle-config-group">
-          <div class="checkbox-group form-group">
-            <input type="checkbox" id="heatmapEnabled">
-            <label for="heatmapEnabled">Show Heatmap</label>
+        <div class="form-group">
+          <label for="lineWidth">Line Width</label>
+          <input type="number" id="lineWidth" value="3" min="1" max="20">
+        </div>
+
+        <div class="form-group">
+          <label for="lineOpacity">Line Opacity</label>
+          <input type="number" id="lineOpacity" value="0.7" min="0" max="1" step="0.1">
+        </div>
+
+        <div class="checkbox-group form-group">
+          <input type="checkbox" id="smoothLines">
+          <label for="smoothLines">Smooth Lines</label>
+        </div>
+        </div>
+
+        <div class="display-option-group">
+        <div class="form-group">
+          <label for="heatmapRadius">Heatmap Radius</label>
+          <input type="number" id="heatmapRadius" value="25" min="5" max="100">
+        </div>
+
+        <div class="form-group">
+          <label for="heatmapBlur">Heatmap Blur</label>
+          <input type="number" id="heatmapBlur" value="15" min="5" max="50">
+        </div>
+
+        <div class="form-group">
+          <label for="heatmapMinOpacity">Heatmap Min Opacity</label>
+          <input type="number" id="heatmapMinOpacity" value="0.05" min="0" max="1" step="0.01">
+        </div>
+
+        <div class="form-group">
+          <label for="heatmapLowColor">Heatmap Low Density Color</label>
+          <div class="color-input-group">
+            <input type="color" id="heatmapLowColorPicker" value="#0000ff">
+            <input type="text" id="heatmapLowColor" value="#0000ff">
           </div>
+        </div>
 
-          <div class="sub-section">
-            <div class="sub-section-header" data-sub="heatmapSettings">
-              <span class="sub-section-icon">▶</span>
-              Heatmap Settings
-            </div>
-            <div class="sub-section-content">
-              <div class="form-group">
-                <label for="heatmapRadius">Radius</label>
-                <input type="number" id="heatmapRadius" value="25" min="5" max="100">
-              </div>
-
-              <div class="form-group">
-                <label for="heatmapBlur">Blur</label>
-                <input type="number" id="heatmapBlur" value="15" min="5" max="50">
-              </div>
-
-              <div class="form-group">
-                <label for="heatmapMinOpacity">Min Opacity</label>
-                <input type="number" id="heatmapMinOpacity" value="0.05" min="0" max="1" step="0.01">
-              </div>
-
-              <div class="form-group">
-                <label for="heatmapLowColor">Low Density Color</label>
-                <div class="color-input-group">
-                  <input type="color" id="heatmapLowColorPicker" value="#0000ff">
-                  <input type="text" id="heatmapLowColor" value="#0000ff">
-                </div>
-              </div>
-
-              <div class="form-group">
-                <label for="heatmapMidColor">Medium Density Color</label>
-                <div class="color-input-group">
-                  <input type="color" id="heatmapMidColorPicker" value="#00ffff">
-                  <input type="text" id="heatmapMidColor" value="#00ffff">
-                </div>
-              </div>
-
-              <div class="form-group">
-                <label for="heatmapHighColor">High Density Color</label>
-                <div class="color-input-group">
-                  <input type="color" id="heatmapHighColorPicker" value="#ff0000">
-                  <input type="text" id="heatmapHighColor" value="#ff0000">
-                </div>
-              </div>
-            </div>
+        <div class="form-group">
+          <label for="heatmapMidColor">Heatmap Medium Density Color</label>
+          <div class="color-input-group">
+            <input type="color" id="heatmapMidColorPicker" value="#00ffff">
+            <input type="text" id="heatmapMidColor" value="#00ffff">
           </div>
+        </div>
+
+        <div class="form-group">
+          <label for="heatmapHighColor">Heatmap High Density Color</label>
+          <div class="color-input-group">
+            <input type="color" id="heatmapHighColorPicker" value="#ff0000">
+            <input type="text" id="heatmapHighColor" value="#ff0000">
+          </div>
+        </div>
         </div>
       </div>
     </div>
@@ -450,6 +407,41 @@
       </button>
     </div>
   </aside>
+
+  <!-- Floating quick actions dock - vertically centered at the left screen
+       edge; sits after the sidebar in the DOM so CSS can slide it along
+       with the sidebar via a sibling selector -->
+  <div class="quick-actions" id="quickActions" role="toolbar" aria-label="Map quick actions">
+    <button class="quick-action-btn" id="qaRecenter" title="Recenter Map" aria-label="Recenter Map" disabled>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="3"></circle>
+        <path d="M3 7V5a2 2 0 0 1 2-2h2"></path>
+        <path d="M17 3h2a2 2 0 0 1 2 2v2"></path>
+        <path d="M21 17v2a2 2 0 0 1-2 2h-2"></path>
+        <path d="M7 21H5a2 2 0 0 1-2-2v-2"></path>
+      </svg>
+    </button>
+    <button class="quick-action-btn" id="qaPoints" title="Show Points" aria-label="Toggle points" aria-pressed="true">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <circle cx="5.5" cy="7.5" r="2"></circle>
+        <circle cx="12" cy="4.5" r="2"></circle>
+        <circle cx="18.5" cy="8.5" r="2"></circle>
+        <circle cx="8" cy="14.5" r="2"></circle>
+        <circle cx="15.5" cy="15.5" r="2"></circle>
+        <circle cx="10.5" cy="20.5" r="2"></circle>
+      </svg>
+    </button>
+    <button class="quick-action-btn" id="qaLines" title="Show Route Lines" aria-label="Toggle route lines" aria-pressed="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+      </svg>
+    </button>
+    <button class="quick-action-btn" id="qaHeatmap" title="Show Heatmap" aria-label="Toggle heatmap" aria-pressed="false">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"></path>
+      </svg>
+    </button>
+  </div>
 
   <!-- Custom date picker popup -->
   <div id="customDatePicker" class="custom-date-picker" style="display: none;">

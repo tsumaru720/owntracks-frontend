@@ -34,8 +34,6 @@ jq -n '
     "APP_DEFAULTS_USER": ["defaults", "user"],
     "APP_DEFAULTS_DEVICE": ["defaults", "device"],
 
-    "APP_STORAGE_KEY": ["storage", "key"],
-
     "APP_DISPLAY_POINTS_SHOW": ["display", "points", "show"],
     "APP_DISPLAY_POINTS_COLOR": ["display", "points", "color"],
     "APP_DISPLAY_POINTS_SIZE": ["display", "points", "size"],

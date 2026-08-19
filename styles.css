@@ -181,6 +181,92 @@ html.dark-mode {
   display: none;
 }
 
+/* Quick Actions Floating Dock - vertically centered at the left screen edge;
+   slides right to hug the sidebar when it opens (sibling selector, so the
+   bar must stay after the sidebar in the DOM) */
+.quick-actions {
+  position: fixed;
+  top: 50%;
+  left: 10px;
+  transform: translateY(-50%);
+  width: 65px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 5px;
+  border-radius: 999px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  z-index: 900; /* above map, below sidebar (1000) and header (1001) */
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+/* Ride along with the sidebar's right edge when it is open */
+.sidebar.open ~ .quick-actions {
+  left: calc(var(--sidebar-width) + 10px);
+}
+
+/* Animate only when the sidebar itself animates (skips page-load restore) */
+.sidebar.transitions-enabled ~ .quick-actions {
+  transition: left 0.3s ease;
+}
+
+.light-mode .quick-actions {
+  background-color: rgba(255, 255, 255, 0.9);
+  border: 1px solid var(--border-light);
+}
+
+.dark-mode .quick-actions {
+  background-color: rgba(42, 42, 42, 0.9);
+  border: 1px solid var(--border-dark);
+}
+
+.quick-action-btn {
+  width: 55px;
+  height: 55px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  background-color: transparent;
+  color: inherit;
+  opacity: 0.55;
+  transition: background-color 0.2s, color 0.2s, opacity 0.2s;
+}
+
+.quick-action-btn svg {
+  width: 28px;
+  height: 28px;
+  pointer-events: none;
+}
+
+.quick-action-btn.active {
+  background-color: var(--accent);
+  color: #fff;
+  opacity: 1;
+}
+
+/* Hover previews the toggle direction: inactive hints toward the accent
+   (about to turn on), active fades toward the bar (about to turn off).
+   Mutually exclusive via :not(.active), so styles swap the instant the
+   class flips on click - no waiting for the mouse to move off */
+.quick-action-btn:hover:not(:disabled):not(.active) {
+  background-color: rgba(51, 136, 255, 0.18);
+  color: var(--accent);
+  opacity: 0.9;
+}
+
+.quick-action-btn.active:hover {
+  opacity: 0.6;
+}
+
+.quick-action-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
 /* Sidebar */
 .sidebar {
   position: fixed;
@@ -316,7 +402,7 @@ body:not(.ui-ready) .sub-section-content {
 }
 
 .section-toggle:not(.collapsed) + .section-content {
-  padding-top: 0;
+  padding-top: 10px;
   padding-bottom: 15px;
 }
 
@@ -324,6 +410,17 @@ body:not(.ui-ready) .sub-section-content {
 .sidebar-section[data-section="datasource"] > .section-content {
   padding-bottom: 15px;
   min-height: fit-content;
+}
+
+/* Visual grouping of point/line/heatmap settings in Display Options -
+   extra bottom margin separates the clusters; form-groups inside each
+   cluster keep their normal 15px spacing */
+.display-option-group {
+  margin-bottom: 30px;
+}
+
+.display-option-group:last-child {
+  margin-bottom: 0;
 }
 
 /* Sub-collapsible sections */
@@ -414,7 +511,7 @@ body:not(.ui-ready) .sub-section-content {
 }
 
 .sub-section-header:not(.collapsed) + .sub-section-content {
-  margin-top: 0;
+  margin-top: 10px;
   margin-bottom: 0;
 }
 
@@ -1122,6 +1219,13 @@ body:not(.ui-ready) .sub-section-content {
 @media (max-width: 600px) {
   :root {
     --sidebar-width: 100%;
+  }
+
+  /* Sidebar covers the whole screen when open here - keep the dock parked
+     at the screen edge (hidden behind the sidebar) instead of sliding
+     off-screen to calc(100% + 10px) */
+  .sidebar.open ~ .quick-actions {
+    left: 10px;
   }
 }
 

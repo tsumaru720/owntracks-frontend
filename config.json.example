@@ -18,9 +18,6 @@
     "user": "owntracks-user",
     "device": "users-device"
   },
-  "storage": {
-    "key": "owntracks_cache"
-  },
   "display": {
     "points": {
       "show": true,

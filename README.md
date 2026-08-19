@@ -76,8 +76,9 @@ The OwnTracks recorder (the API) can take a long time to give a response if quer
 1. Select user and device from dropdowns
 2. Pick a date range via the quick preset buttons, or set a custom From/To range
 3. Click "Load Data"
-4. Customize visualization in sidebar (all changes use cached data)
-5. Toggle dark/light mode at bottom of sidebar
+4. Toggle points/lines/heatmap and recenter from the floating quick actions dock on the map
+5. Customize styling in the sidebar (all changes use cached data)
+6. Toggle dark/light mode at bottom of sidebar
 
 ## Configuration
 
@@ -102,7 +103,6 @@ It is recommended to view this document directly as the table is too wide for th
 | `APP_API_COOKIENAME` | `api.cookieName` | Cookie name | No | — |
 | `APP_API_COOKIEVALUE` | `api.cookieValue` | Cookie value | No | — |
 | `APP_API_TIMEOUT` | `api.timeout` | Request timeout (milliseconds) | No | `600000` |
-| `APP_STORAGE_KEY` | `storage.key` | localStorage key prefix for caching | No | `owntracks_cache` |
 | `APP_MAP_TILESERVER` | `map.tileServer` | Map tile server URL template | No | `https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png` |
 | `APP_MAP_DEFAULTCENTER` | `map.defaultCenter` | Default map center as `[lat, lng]` | No | `[51.50138, -0.14189]` |
 | `APP_MAP_DEFAULTZOOM` | `map.defaultZoom` | Default map zoom level | No | `13` |
@@ -195,12 +195,18 @@ services:
 
 ## Display Options
 
+### Quick Actions Dock
+- Floating dock on the left edge of the map (slides along with the sidebar)
+- Recenter map on loaded data
+- Toggle points, route lines, and heatmap visibility
+- Toggle states are saved in browser settings; defaults can be set via `display.points.show`, `display.lines.show`, and `display.heatmap.enabled`
+
 ### Points
-- Toggle visibility, customize color/size/opacity
+- Customize color/size/opacity (visibility via the quick actions dock)
 - Hover tooltips show time, date, altitude
 
 ### Lines
-- Toggle visibility, customize color/width/opacity
+- Customize color/width/opacity (visibility via the quick actions dock)
 - Optional smoothing
 
 ### Altitude Gradient
@@ -209,7 +215,7 @@ services:
 - Configurable min/max range and colors
 
 ### Heatmap
-- Point density overlay
+- Point density overlay (visibility via the quick actions dock)
 - Customizable radius, blur, opacity
 - Custom gradient colors (low/medium/high)
 
@@ -217,16 +223,23 @@ services:
 - Filter points by GPS accuracy (meters)
 - 0 = show all points
 
+### Statistics
+- Total/visible point counts, loaded time range, and maximum accuracy for the current selection
+- Cache status shown when browser storage caching is enabled: days cached for the selection plus storage usage
+
 ### Debug Options
-- **Console Logging**: Toggle console output
 - **Dynamic Point Visibility**: Toggle auto-density adjustment
-- **Clear Cached Data**: Remove location cache only
-- **Clear All Settings**: Wipe cache, display settings, and theme
+- **Console Logging**: Toggle console output
+- **Cache location data in browser**: Enable the persistent browser cache (see Data Caching below)
+- **Clear Device Cache**: Remove cached data for the selected user/device only
+- **Clear All Cache**: Remove all cached location data (all users/devices); settings and theme are kept
+- **Clear Settings**: Reset all saved settings (display, theme, selections); cached data is kept
+- **Clear All Data**: Remove everything - cached data, settings, and theme
 
 ## Data Caching
 
 1. **Memory Cache** (automatic): API responses stored in memory; display changes trigger instant redraws
-2. **Storage Cache** (optional): Enable "Cache data in browser" to persist across sessions; data cached per day per device
+2. **Storage Cache** (optional): Enable "Cache location data in browser" (Debug section) to persist across sessions in IndexedDB; data cached per day per device
 
 ## Performance
 

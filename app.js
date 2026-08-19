@@ -239,8 +239,6 @@
 
   function getDefaultSetting(key) {
     const defaults = {
-      showPoints: true,
-      showLines: true,
       pointSize: 2,
       pointColor: '#3388ff',
       pointOpacity: 0.5,
@@ -262,7 +260,7 @@
       heatmapHighColor: '#ff0000',
       darkMode: false,
       storageEnabled: true,    // Enabled by default
-      sidebarOpen: false,
+      sidebarOpen: true,       // Visible by default
       autoFitToBounds: true,   // Auto-fit map to data by default
       dynamicPointVisibility: true,  // Enabled by default
       consoleLoggingEnabled: false  // Console logging disabled by default
@@ -281,10 +279,12 @@
       // Map flat keys to nested config paths
       const configPaths = {
         // Points
+        'showPoints': 'display.points.show',
         'pointColor': 'display.points.color',
         'pointSize': 'display.points.size',
         'pointOpacity': 'display.points.opacity',
         // Lines
+        'showLines': 'display.lines.show',
         'lineColor': 'display.lines.color',
         'lineWidth': 'display.lines.width',
         'lineOpacity': 'display.lines.opacity',
@@ -309,6 +309,7 @@
         'heatmapLowColor': 'display.heatmap.gradient.lowColor',
         'heatmapMidColor': 'display.heatmap.gradient.midColor',
         'heatmapHighColor': 'display.heatmap.gradient.highColor',
+        'heatmapMaxZoom': 'display.heatmap.maxZoom',
         // Storage
         'storageEnabled': 'display.storageEnabled'
       };
@@ -832,11 +833,16 @@
     });
     document.getElementById('loadDataBtn').addEventListener('click', loadData);
     document.getElementById('refreshBtn').addEventListener('click', loadDataFromAPI);
-    document.getElementById('recenterBtn').addEventListener('click', () => {
+
+    // Floating quick actions dock
+    document.getElementById('qaRecenter').addEventListener('click', () => {
       if (state.data.filtered.length > 0) {
         fitMapToBounds();
       }
     });
+    document.getElementById('qaPoints').addEventListener('click', () => toggleDisplaySetting('showPoints', true));
+    document.getElementById('qaLines').addEventListener('click', () => toggleDisplaySetting('showLines', true));
+    document.getElementById('qaHeatmap').addEventListener('click', () => toggleDisplaySetting('heatmapEnabled', false));
 
     // Auto-fit to bounds
     document.getElementById('autoFitToBounds').addEventListener('change', (e) => {
@@ -851,10 +857,6 @@
     });
 
     // Display options
-    document.getElementById('showPoints').addEventListener('change', (e) => {
-      saveSetting('showPoints', e.target.checked, true);
-      redrawMap();
-    });
     document.getElementById('pointColor').addEventListener('change', (e) => {
       document.getElementById('pointColorPicker').value = e.target.value;
       saveSetting('pointColor', e.target.value, '#3388ff');
@@ -874,10 +876,6 @@
       redrawMap();
     });
 
-    document.getElementById('showLines').addEventListener('change', (e) => {
-      saveSetting('showLines', e.target.checked, true);
-      redrawMap();
-    });
     document.getElementById('lineColor').addEventListener('change', (e) => {
       document.getElementById('lineColorPicker').value = e.target.value;
       saveSetting('lineColor', e.target.value, '#3388ff');
@@ -973,10 +971,6 @@
     });
 
     // Heatmap
-    document.getElementById('heatmapEnabled').addEventListener('change', (e) => {
-      saveSetting('heatmapEnabled', e.target.checked, false);
-      redrawMap();
-    });
     document.getElementById('heatmapRadius').addEventListener('change', (e) => {
       saveSetting('heatmapRadius', parseInt(e.target.value), 25);
       redrawMap();
@@ -1192,10 +1186,6 @@
   }
 
   async function applySettingsToUI() {
-    // Display options - visibility toggles
-    document.getElementById('showPoints').checked = getSetting('showPoints', true);
-    document.getElementById('showLines').checked = getSetting('showLines', true);
-
     // Display options - colors and sizes
     if (getSetting('pointColor', '#3388ff') !== '#3388ff') {
       document.getElementById('pointColor').value = getSetting('pointColor', '#3388ff');
@@ -1255,7 +1245,6 @@
     }
 
     // Heatmap
-    document.getElementById('heatmapEnabled').checked = getSetting('heatmapEnabled', false);
     if (getSetting('heatmapRadius', 25) !== 25) {
       document.getElementById('heatmapRadius').value = getSetting('heatmapRadius', 25);
     }
@@ -1294,6 +1283,31 @@
     document.getElementById('consoleLoggingEnabled').checked = getSetting('consoleLoggingEnabled', false);
 
     // Dark mode toggle is updated in applyTheme()
+
+    updateQuickActionsBar();
+  }
+
+  // Toggle one of the dock-driven display settings (points/lines/heatmap).
+  // Persisted with a null default so an explicit toggle always wins over any
+  // config-file value (e.g. display.heatmap.enabled from environment.json)
+  function toggleDisplaySetting(key, defaultValue) {
+    saveSetting(key, !getSetting(key, defaultValue), null);
+    redrawMap();
+    updateQuickActionsBar();
+  }
+
+  // Reflect the display settings onto the floating quick actions dock
+  function updateQuickActionsBar() {
+    const points = getSetting('showPoints', true);
+    const lines = getSetting('showLines', true);
+    const heatmap = getSetting('heatmapEnabled', false);
+
+    document.getElementById('qaPoints').classList.toggle('active', points);
+    document.getElementById('qaPoints').setAttribute('aria-pressed', points);
+    document.getElementById('qaLines').classList.toggle('active', lines);
+    document.getElementById('qaLines').setAttribute('aria-pressed', lines);
+    document.getElementById('qaHeatmap').classList.toggle('active', heatmap);
+    document.getElementById('qaHeatmap').setAttribute('aria-pressed', heatmap);
   }
 
   function toggleSidebar() {
@@ -1303,7 +1317,7 @@
     // Enable transitions for manual toggles
     sidebar.classList.add('transitions-enabled');
     sidebar.classList.toggle('open', state.sidebarOpen);
-    saveSetting('sidebarOpen', state.sidebarOpen, false);
+    saveSetting('sidebarOpen', state.sidebarOpen, true);
 
     // If auto-fit is enabled and we have data loaded, re-fit bounds to account for sidebar
     // Delay slightly to allow sidebar transition to start
@@ -1445,7 +1459,7 @@
       const defaults = {
         datasource: false,    // Data Source expanded by default
         stats: false,         // Stats expanded by default
-        display: false,       // Display Options expanded by default
+        display: true,        // Display Options collapsed by default
         accuracy: true,       // Accuracy Filter collapsed by default
         altitude: true,       // Altitude Gradient collapsed by default
         debug: true           // Debug collapsed by default
@@ -2444,8 +2458,8 @@
         return;
       }
 
-      // Show recenter button when we have data
-      document.getElementById('recenterBtn').style.display = 'block';
+      // Enable recenter on the quick actions dock when we have data
+      document.getElementById('qaRecenter').disabled = false;
 
       // Single pass over all points for time range and max accuracy.
       // (Deliberately not Math.min(...spread) - spreading a large array
@@ -2516,7 +2530,7 @@
     redrawMap();
     updateStats();
     updateDataSourceIndicator(false);
-    document.getElementById('recenterBtn').style.display = 'none';
+    document.getElementById('qaRecenter').disabled = true;
   }
 
   function clearMapLayersOnly() {
@@ -2528,7 +2542,7 @@
     redrawMap();
     updateStats();
     updateDataSourceIndicator(false);
-    document.getElementById('recenterBtn').style.display = 'none';
+    document.getElementById('qaRecenter').disabled = true;
     // Note: We don't fit bounds here, so current map position is preserved
   }
 
@@ -3254,7 +3268,7 @@
         radius: zoomAdjustedRadius,
         blur: zoomAdjustedBlur,
         minOpacity: getSetting('heatmapMinOpacity', getHeatmapSetting('minOpacity')),
-        maxZoom: 18, // Limit max zoom for heatmap performance
+        maxZoom: getSetting('heatmapMaxZoom', 18), // Limit max zoom for heatmap performance
         gradient: buildHeatmapGradient(
           getSetting('heatmapLowColor', '#0000ff'),
           getSetting('heatmapMidColor', '#00ffff'),
