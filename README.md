@@ -74,7 +74,7 @@ The OwnTracks recorder (the API) can take a long time to give a response if quer
 ## Usage
 
 1. Select user and device from dropdowns
-2. Choose time period (presets or custom range)
+2. Pick a date range via the quick preset buttons, or set a custom From/To range
 3. Click "Load Data"
 4. Customize visualization in sidebar (all changes use cached data)
 5. Toggle dark/light mode at bottom of sidebar
@@ -110,7 +110,6 @@ It is recommended to view this document directly as the table is too wide for th
 | `APP_MAP_MAXZOOM` | `map.maxZoom` | Maximum zoom level | No | `21` |
 | `APP_DEFAULTS_USER` | `defaults.user` | Default username to select | No | — |
 | `APP_DEFAULTS_DEVICE` | `defaults.device` | Default device to select | No | — |
-| `APP_DEFAULTS_TIMEPERIOD` | `defaults.timePeriod` | Default time period | No | `30days` |
 | `APP_DISPLAY_POINTS_SHOW` | `display.points.show` | Show points by default | No | `true` |
 | `APP_DISPLAY_POINTS_COLOR` | `display.points.color` | Default point color | No | `#3388ff` |
 | `APP_DISPLAY_POINTS_SIZE` | `display.points.size` | Default point size | No | `2` |
@@ -162,8 +161,7 @@ It is recommended to view this document directly as the table is too wide for th
     "defaultZoom": 13
   },
   "defaults": {
-    "user": "john",
-    "timePeriod": "7days"
+    "user": "john"
   },
   "debug": {
     "consoleLogging": false
@@ -184,7 +182,6 @@ services:
       APP_MAP_DEFAULTCENTER: "[51.50138,-0.14189]"
       APP_MAP_DEFAULTZOOM: "13"
       APP_DEFAULTS_USER: john
-      APP_DEFAULTS_TIMEPERIOD: 7days
       APP_DEBUG_CONSOLELOGGING: "false"
       SERVER_LOG_LEVEL: "info"
       SERVER_LOG_FORMAT: "pretty"

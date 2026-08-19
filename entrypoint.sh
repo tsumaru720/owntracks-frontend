@@ -33,7 +33,6 @@ jq -n '
 
     "APP_DEFAULTS_USER": ["defaults", "user"],
     "APP_DEFAULTS_DEVICE": ["defaults", "device"],
-    "APP_DEFAULTS_TIMEPERIOD": ["defaults", "timePeriod"],
 
     "APP_STORAGE_KEY": ["storage", "key"],
 

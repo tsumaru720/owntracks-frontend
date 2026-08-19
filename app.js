@@ -482,11 +482,6 @@
     // Data source controls
     document.getElementById('userSelect').addEventListener('change', handleUserChange);
     document.getElementById('deviceSelect').addEventListener('change', handleDeviceChange);
-    document.getElementById('timePeriod').addEventListener('change', async (e) => {
-      const value = e.target.value;
-      saveSetting('timePeriod', value, '30days');
-      await handleTimePeriodChange();
-    });
     // Custom date picker functionality
     const customDatePicker = document.getElementById('customDatePicker');
     let currentPickerInput = null;
@@ -570,6 +565,10 @@
         } else {
           saveSetting('toDate', dateStr, '');
         }
+
+        // Manually picked dates override any active preset
+        saveSetting('datePreset', 'custom', '30days');
+        updateDatePresetButtons();
 
         await updateRefreshButton();
         confirmDateInput(currentPickerInput);
@@ -827,10 +826,14 @@
 
     document.getElementById('fromDate').addEventListener('change', async (e) => {
       saveSetting('fromDate', e.target.value, '');
+      saveSetting('datePreset', 'custom', '30days');
+      updateDatePresetButtons();
       await updateRefreshButton();
     });
     document.getElementById('toDate').addEventListener('change', async (e) => {
       saveSetting('toDate', e.target.value, '');
+      saveSetting('datePreset', 'custom', '30days');
+      updateDatePresetButtons();
       await updateRefreshButton();
     });
     document.getElementById('loadDataBtn').addEventListener('click', loadData);
@@ -1643,37 +1646,32 @@
   // ============================================================================
 
   async function setDefaultDates() {
-    const savedPeriod = getSetting('timePeriod', '30days');
-    const savedFrom = getSetting('fromDate', '');
-    const savedTo = getSetting('toDate', '');
-    const periodSelect = document.getElementById('timePeriod');
-    const fromInput = document.getElementById('fromDate');
-    const toInput = document.getElementById('toDate');
+    const preset = getSetting('datePreset', '30days');
 
-    if (savedPeriod) {
-      periodSelect.value = savedPeriod;
-    }
-
-    if (savedFrom && savedTo) {
-      fromInput.value = savedFrom.replace('T', ' ');
-      fromInput.dataset.value = savedFrom;
-      toInput.value = savedTo.replace('T', ' ');
-      toInput.dataset.value = savedTo;
+    if (preset === 'custom') {
+      const savedFrom = getSetting('fromDate', '');
+      const savedTo = getSetting('toDate', '');
+      if (savedFrom && savedTo) {
+        const fromInput = document.getElementById('fromDate');
+        const toInput = document.getElementById('toDate');
+        fromInput.value = savedFrom.replace('T', ' ');
+        fromInput.dataset.value = savedFrom;
+        toInput.value = savedTo.replace('T', ' ');
+        toInput.dataset.value = savedTo;
+      } else {
+        // No custom range saved yet - fall back to the default preset
+        const { from, to } = resolveDatePreset('30days');
+        setDateInputs(from, to);
+      }
     } else {
-      const today = new Date();
-      const thirtyDaysAgo = new Date(today.getTime() - 29 * 24 * 60 * 60 * 1000);
-      thirtyDaysAgo.setHours(0, 0, 0, 0);
-      today.setHours(23, 59, 59, 999);
-      const fromStr = formatDateTimeForInput(thirtyDaysAgo);
-      const toStr = formatDateTimeForInput(today);
-      fromInput.value = fromStr.replace('T', ' ');
-      fromInput.dataset.value = fromStr;
-      toInput.value = toStr.replace('T', ' ');
-      toInput.dataset.value = toStr;
+      // Presets are resolved against the current date (never a "today"
+      // captured at page load) and re-resolved on every subsequent query
+      const { from, to } = resolveDatePreset(preset);
+      setDateInputs(from, to);
     }
 
-    await handleTimePeriodChange();
-    initQuickRangeButtons();
+    await updateRefreshButton();
+    initDatePresetButtons();
   }
 
   function formatDateForInput(date) {
@@ -1756,62 +1754,25 @@
   }
 
   function getDateRange() {
-    const period = document.getElementById('timePeriod').value;
-    const now = new Date();
-    let from, to;
+    const preset = getSetting('datePreset', '30days');
 
-    switch (period) {
-      case 'today':
-        // Get today's local date boundaries (midnight to now)
-        from = new Date();
-        from.setHours(0, 0, 0, 0);
-        to = new Date(); // Current time, not end of day
-        break;
-      case '7days':
-        from = new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000);
-        from.setHours(0, 0, 0, 0);
-        to = new Date(now);
-        to.setHours(23, 59, 59, 999);
-        break;
-      case '30days':
-        from = new Date(now.getTime() - 29 * 24 * 60 * 60 * 1000);
-        from.setHours(0, 0, 0, 0);
-        to = new Date(now);
-        to.setHours(23, 59, 59, 999);
-        break;
-      case '90days':
-        from = new Date(now.getTime() - 89 * 24 * 60 * 60 * 1000);
-        from.setHours(0, 0, 0, 0);
-        to = new Date(now);
-        to.setHours(23, 59, 59, 999);
-        break;
-      case '1year':
-        from = new Date(now.getTime() - 364 * 24 * 60 * 60 * 1000);
-        from.setHours(0, 0, 0, 0);
-        to = new Date(now);
-        to.setHours(23, 59, 59, 999);
-        break;
-      case 'all':
-        from = new Date('2010-01-01');
-        from.setHours(0, 0, 0, 0);
-        to = new Date(now);
-        to.setHours(23, 59, 59, 999);
-        break;
-      case 'custom':
-        // Get dates from custom date picker (stored in dataset.value with 'T' separator)
-        const fromVal = document.getElementById('fromDate').dataset.value || document.getElementById('fromDate').value;
-        const toVal = document.getElementById('toDate').dataset.value || document.getElementById('toDate').value;
-        from = new Date(fromVal.replace(' ', 'T'));
-        to = new Date(toVal.replace(' ', 'T'));
-        break;
-      default:
-        from = new Date(now.getTime() - 29 * 24 * 60 * 60 * 1000);
-        from.setHours(0, 0, 0, 0);
-        to = new Date(now);
-        to.setHours(23, 59, 59, 999);
+    // An active preset is re-resolved against the current moment so a page
+    // left open across midnight never queries with a stale "today". The
+    // inputs are synced so the text boxes always show what will be queried.
+    if (preset !== 'custom') {
+      const { from, to } = resolveDatePreset(preset);
+      setDateInputs(from, to);
+      return { from, to };
     }
 
-    return { from, to };
+    // Custom range: dates picked via the date picker, stored as local time
+    // ("YYYY-MM-DDTHH:mm", converted to UTC only when the API query is built)
+    const fromVal = document.getElementById('fromDate').dataset.value || document.getElementById('fromDate').value;
+    const toVal = document.getElementById('toDate').dataset.value || document.getElementById('toDate').value;
+    return {
+      from: new Date(fromVal.replace(' ', 'T')),
+      to: new Date(toVal.replace(' ', 'T'))
+    };
   }
 
   function formatDisplayDate(dateValue) {
@@ -1823,126 +1784,84 @@
     }).format(date);
   }
 
-  async function handleTimePeriodChange() {
-    const period = document.getElementById('timePeriod').value;
-    const isCustom = period === 'custom';
-    const customDateRow = document.getElementById('customDateRow');
-    const quickDateRanges = document.getElementById('quickDateRanges');
-    const prevDisplay = customDateRow.style.display;
-    customDateRow.style.display = isCustom ? 'block' : 'none';
-    quickDateRanges.style.display = isCustom ? 'block' : 'none';
+  /**
+   * Resolve a named date preset against the current moment. All boundaries
+   * are local time (local midnight / local end of day); conversion to UTC
+   * happens only when the API query is built.
+   */
+  function resolveDatePreset(preset) {
+    const now = new Date();
+    const to = new Date(now);
+    to.setHours(23, 59, 59, 999);
 
-    // Update the date inputs to reflect the new period
-    if (!isCustom) {
-      const { from, to } = getDateRange();
-      const fromStr = formatDateTimeForInput(from);
-      const toStr = formatDateTimeForInput(to);
-      const fromInput = document.getElementById('fromDate');
-      const toInput = document.getElementById('toDate');
-      fromInput.value = fromStr.replace('T', ' ');
-      fromInput.dataset.value = fromStr;
-      toInput.value = toStr.replace('T', ' ');
-      toInput.dataset.value = toStr;
-      // Save the new dates
-      saveSetting('fromDate', fromStr, '');
-      saveSetting('toDate', toStr, '');
-    }
+    const startDaysAgo = (days) => {
+      const d = new Date(now);
+      d.setDate(d.getDate() - days);
+      d.setHours(0, 0, 0, 0);
+      return d;
+    };
 
-    // Update the refresh button state
-    await updateRefreshButton();
-
-    // If the display state changed, update parent section height
-    if (prevDisplay !== customDateRow.style.display) {
-      setTimeout(() => {
-        const parentSection = customDateRow.closest('.sidebar-section');
-        if (parentSection) {
-          const parentContent = parentSection.querySelector(':scope > .section-content');
-          const toggle = parentSection.querySelector(':scope > .section-toggle');
-          if (parentContent && !toggle.classList.contains('collapsed')) {
-            parentContent.style.maxHeight = 'none';
-            requestAnimationFrame(() => {
-              const height = parentContent.scrollHeight;
-              if (height > 0) {
-                parentContent.style.maxHeight = `${height}px`;
-              }
-            });
-          }
-        }
-      }, 50);
+    switch (preset) {
+      case 'today':
+        return { from: startDaysAgo(0), to };
+      case '2days':
+        return { from: startDaysAgo(1), to };
+      case '7days':
+        return { from: startDaysAgo(6), to };
+      case '30days':
+        return { from: startDaysAgo(29), to };
+      case '90days':
+        return { from: startDaysAgo(89), to };
+      case '6months': {
+        const from = new Date(now);
+        from.setMonth(from.getMonth() - 6);
+        from.setHours(0, 0, 0, 0);
+        return { from, to };
+      }
+      case '1year': {
+        const from = new Date(now);
+        from.setFullYear(from.getFullYear() - 1);
+        from.setHours(0, 0, 0, 0);
+        return { from, to };
+      }
+      case 'all':
+        // Start of the epoch (1970-01-01T00:00:00Z) through end of today
+        return { from: new Date(0), to };
+      default:
+        return { from: startDaysAgo(29), to };
     }
   }
 
-  function initQuickRangeButtons() {
-    const quickRangeButtons = document.querySelectorAll('.quick-range');
-    quickRangeButtons.forEach(button => {
-      button.addEventListener('click', () => {
-        const range = button.getAttribute('data-range');
-        const now = new Date();
-        let fromDate, toDate;
+  function setDateInputs(from, to) {
+    const fromStr = formatDateTimeForInput(from);
+    const toStr = formatDateTimeForInput(to);
+    const fromInput = document.getElementById('fromDate');
+    const toInput = document.getElementById('toDate');
+    fromInput.value = fromStr.replace('T', ' ');
+    fromInput.dataset.value = fromStr;
+    toInput.value = toStr.replace('T', ' ');
+    toInput.dataset.value = toStr;
+  }
 
-        switch (range) {
-          case 'today':
-            fromDate = new Date(now);
-            fromDate.setHours(0, 0, 0, 0);
-            toDate = new Date(now);
-            toDate.setHours(23, 59, 59, 999);
-            break;
-          case 'yesterday':
-            fromDate = new Date(now);
-            fromDate.setDate(fromDate.getDate() - 1);
-            fromDate.setHours(0, 0, 0, 0);
-            toDate = new Date(fromDate);
-            toDate.setHours(23, 59, 59, 999);
-            break;
-          case 'thisweek':
-            fromDate = new Date(now);
-            const dayOfWeek = fromDate.getDay();
-            const diff = fromDate.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
-            fromDate.setDate(diff);
-            fromDate.setHours(0, 0, 0, 0);
-            toDate = new Date(now);
-            toDate.setHours(23, 59, 59, 999);
-            break;
-          case 'lastweek':
-            fromDate = new Date(now);
-            const lastWeekDay = fromDate.getDay();
-            const lastWeekDiff = fromDate.getDate() - lastWeekDay + (lastWeekDay === 0 ? -6 : 1) - 7;
-            fromDate.setDate(lastWeekDiff);
-            fromDate.setHours(0, 0, 0, 0);
-            toDate = new Date(fromDate);
-            toDate.setDate(toDate.getDate() + 6);
-            toDate.setHours(23, 59, 59, 999);
-            break;
-          case 'thismonth':
-            fromDate = new Date(now.getFullYear(), now.getMonth(), 1);
-            fromDate.setHours(0, 0, 0, 0);
-            toDate = new Date(now);
-            toDate.setHours(23, 59, 59, 999);
-            break;
-          case 'lastmonth':
-            fromDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-            fromDate.setHours(0, 0, 0, 0);
-            toDate = new Date(now.getFullYear(), now.getMonth(), 0);
-            toDate.setHours(23, 59, 59, 999);
-            break;
-          case 'thisyear':
-            fromDate = new Date(now.getFullYear(), 0, 1);
-            fromDate.setHours(0, 0, 0, 0);
-            toDate = new Date(now);
-            toDate.setHours(23, 59, 59, 999);
-            break;
-        }
+  function updateDatePresetButtons() {
+    const active = getSetting('datePreset', '30days');
+    document.querySelectorAll('.quick-range').forEach(button => {
+      button.classList.toggle('active', button.dataset.preset === active);
+    });
+  }
 
-        const fromInput = document.getElementById('fromDate');
-        const toInput = document.getElementById('toDate');
-        const fromStr = formatDateTimeForInput(fromDate);
-        const toStr = formatDateTimeForInput(toDate);
-        fromInput.value = fromStr.replace('T', ' ');
-        fromInput.dataset.value = fromStr;
-        toInput.value = toStr.replace('T', ' ');
-        toInput.dataset.value = toStr;
+  function initDatePresetButtons() {
+    document.querySelectorAll('.quick-range').forEach(button => {
+      button.addEventListener('click', async () => {
+        const preset = button.dataset.preset;
+        saveSetting('datePreset', preset, '30days');
+        const { from, to } = resolveDatePreset(preset);
+        setDateInputs(from, to);
+        updateDatePresetButtons();
+        await updateRefreshButton();
       });
     });
+    updateDatePresetButtons();
   }
 
   // ============================================================================

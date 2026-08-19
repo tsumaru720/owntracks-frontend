@@ -76,20 +76,7 @@
           </select>
         </div>
 
-        <div class="form-group">
-          <label for="timePeriod">Time Period</label>
-          <select id="timePeriod">
-            <option value="today">Today</option>
-            <option value="7days">Last 7 days</option>
-            <option value="30days" selected>Last 30 days</option>
-            <option value="90days">Last 90 days</option>
-            <option value="1year">Last year</option>
-            <option value="all">All time</option>
-            <option value="custom">Custom</option>
-          </select>
-        </div>
-
-        <div id="customDateRow" style="display: none;">
+        <div id="customDateRow">
           <div class="form-group date-input-wrapper" data-for="fromDate">
             <label for="fromDate">From</label>
             <input type="text" id="fromDate" readonly placeholder="Select date and time">
@@ -100,17 +87,18 @@
           </div>
         </div>
 
-        <!-- Quick Date Range Buttons -->
-        <div id="quickDateRanges" style="display: none;">
+        <!-- Quick Date Range Presets -->
+        <div id="quickDateRanges">
           <label style="font-size: 13px; margin-bottom: 5px; font-weight: 500;">Quick Ranges:</label>
           <div class="quick-range-buttons">
-            <button type="button" class="btn btn-sm quick-range" data-range="today">Today</button>
-            <button type="button" class="btn btn-sm quick-range" data-range="yesterday">Yesterday</button>
-            <button type="button" class="btn btn-sm quick-range" data-range="thisweek">This Week</button>
-            <button type="button" class="btn btn-sm quick-range" data-range="lastweek">Last Week</button>
-            <button type="button" class="btn btn-sm quick-range" data-range="thismonth">This Month</button>
-            <button type="button" class="btn btn-sm quick-range" data-range="lastmonth">Last Month</button>
-            <button type="button" class="btn btn-sm quick-range" data-range="thisyear">This Year</button>
+            <button type="button" class="btn btn-sm quick-range" data-preset="today">Today</button>
+            <button type="button" class="btn btn-sm quick-range" data-preset="2days">Last 2 Days</button>
+            <button type="button" class="btn btn-sm quick-range" data-preset="7days">Last 7 Days</button>
+            <button type="button" class="btn btn-sm quick-range" data-preset="30days">Last 30 Days</button>
+            <button type="button" class="btn btn-sm quick-range" data-preset="90days">Last 90 Days</button>
+            <button type="button" class="btn btn-sm quick-range" data-preset="6months">Last 6 Months</button>
+            <button type="button" class="btn btn-sm quick-range" data-preset="1year">Last 1 Year</button>
+            <button type="button" class="btn btn-sm quick-range" data-preset="all">All Time</button>
           </div>
         </div>
 

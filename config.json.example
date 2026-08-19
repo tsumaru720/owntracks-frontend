@@ -16,8 +16,7 @@
   },
   "defaults": {
     "user": "owntracks-user",
-    "device": "users-device",
-    "timePeriod": "30days"
+    "device": "users-device"
   },
   "storage": {
     "key": "owntracks_cache"

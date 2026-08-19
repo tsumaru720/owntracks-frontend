@@ -870,6 +870,11 @@ body:not(.ui-ready) .sub-section-content {
   color: var(--text-dark);
 }
 
+.quick-range.active {
+  background-color: var(--accent);
+  color: #fff;
+}
+
 /* Loading Overlay */
 .loading-overlay {
   position: fixed;
