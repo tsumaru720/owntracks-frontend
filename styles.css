@@ -449,8 +449,16 @@ body:not(.ui-ready) .sub-section-content {
   padding-bottom: 6px;
 }
 
+/* Keep the header's small padding change in step with the collapse animation */
+.sidebar.transitions-enabled .section-toggle.collapsed {
+  transition: opacity 0.2s, padding 0.3s ease;
+}
+
+/* Animate padding along with max-height so contents don't jump up when the
+   padding is removed - only on the collapsed state, so the expand path still
+   snaps padding back instantly while measuring height with transitions off */
 .sidebar.transitions-enabled .section-toggle.collapsed + .section-content {
-  transition: max-height 0.3s ease, opacity 0.3s ease, visibility 0s linear 0.3s;
+  transition: max-height 0.3s ease, opacity 0.3s ease, visibility 0s linear 0.3s, padding-top 0.3s ease, padding-bottom 0.3s ease;
 }
 
 .section-toggle:not(.collapsed) + .section-content {
@@ -518,6 +526,12 @@ body:not(.ui-ready) .sub-section-content {
   padding: 4px 0;
 }
 
+/* Keep the sub-header's margin/padding change in step with the collapse
+   animation (gated on transitions-enabled to skip page-load restore) */
+.sidebar.transitions-enabled .sub-section-header.collapsed {
+  transition: opacity 0.2s, margin 0.3s ease, padding 0.3s ease;
+}
+
 .sub-section-header:hover {
   opacity: 1;
 }
@@ -559,7 +573,7 @@ body:not(.ui-ready) .sub-section-content {
 }
 
 .sidebar.transitions-enabled .sub-section-header.collapsed + .sub-section-content {
-  transition: max-height 0.3s ease, opacity 0.3s ease, visibility 0s linear 0.3s;
+  transition: max-height 0.3s ease, opacity 0.3s ease, visibility 0s linear 0.3s, margin-top 0.3s ease, margin-bottom 0.3s ease;
 }
 
 .sub-section-header:not(.collapsed) + .sub-section-content {
