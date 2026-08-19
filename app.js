@@ -1314,15 +1314,19 @@
     }
   }
 
-  function saveMapPosition() {
-    // Only save if auto-fit is disabled (user wants manual control)
-    if (getSetting('autoFitToBounds', true)) {
+  function saveMapPosition(force) {
+    // Only save if auto-fit is disabled (user wants manual control), unless
+    // forced - forced saves record the result of a completed auto-fit so
+    // turning auto-fit off later keeps the current view instead of jumping
+    // back to a stale position
+    if (!force && getSetting('autoFitToBounds', true)) {
       return;
     }
 
     // Don't save positions caused by programmatic moves (initial view,
-    // restore, fit-to-bounds) - only genuine user interaction should persist
-    if (state.suppressMapSave) {
+    // restore, mid-animation frames) - only genuine user interaction or a
+    // completed auto-fit should persist
+    if (!force && state.suppressMapSave) {
       return;
     }
 
@@ -1335,8 +1339,8 @@
 
   /**
    * Run a programmatic map view change (setView/fitBounds) without it being
-   * persisted as a user map position. moveend can fire asynchronously when
-   * Leaflet animates, so the flag is cleared on the next tick.
+   * persisted as a user map position. Fitted views are saved separately via
+   * the forced save in fitMapToBounds.
    */
   function applyProgrammaticMapView(fn) {
     state.suppressMapSave = true;
@@ -3399,10 +3403,23 @@
       leftPadding = sidebar.offsetWidth + 20; // Full sidebar width plus small buffer
     }
 
+    // Record the fitted view once the move settles (the timeout is a fallback
+    // for fits that change nothing, where Leaflet may not fire moveend at all)
+    let fitSaved = false;
+    const saveFittedPosition = () => {
+      if (!fitSaved) {
+        fitSaved = true;
+        saveMapPosition(true);
+      }
+    };
+    state.map.once('moveend', saveFittedPosition);
+    setTimeout(saveFittedPosition, 500);
+
     applyProgrammaticMapView(() => {
       state.map.fitBounds(bounds, {
         paddingTopLeft: [leftPadding, basePadding],
-        paddingBottomRight: [basePadding, basePadding]
+        paddingBottomRight: [basePadding, basePadding],
+        animate: false
       });
     });
   }
