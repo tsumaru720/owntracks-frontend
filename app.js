@@ -2539,6 +2539,7 @@
       return new Promise((resolve, reject) => {
         let selectionBytes = 0;
         let totalBytes = 0;
+        let selectionDaysWithData = 0;
 
         const tx = db.transaction([STORE_CACHE], 'readonly');
         const store = tx.objectStore(STORE_CACHE);
@@ -2555,13 +2556,19 @@
               if (user !== undefined && value.user === user &&
                   (device === undefined || value.device === device)) {
                 selectionBytes += value.data.byteLength;
+                // Empty days are cached as zero-byte buffers
+                if (value.data.byteLength > 0) selectionDaysWithData++;
               }
             }
             cursor.continue();
           }
         };
 
-        tx.oncomplete = () => resolve({ selection: selectionBytes, total: totalBytes });
+        tx.oncomplete = () => resolve({
+          selection: selectionBytes,
+          total: totalBytes,
+          selectionDaysWithData
+        });
         tx.onerror = () => reject(tx.error);
       });
     }
@@ -3507,7 +3514,11 @@
       logWarn('Failed to calculate IndexedDB usage:', e);
     }
 
-    return { selection: cache.selection, total: localStorageBytes + cache.total };
+    return {
+      selection: cache.selection,
+      total: localStorageBytes + cache.total,
+      daysWithData: cache.selectionDaysWithData
+    };
   }
 
   // Format bytes as human-readable string
@@ -3569,7 +3580,8 @@
 
     if (storageEnabled && singleSelection) {
       usage = await calculateStorageUsage(user, device);
-      statusText = `Cache: ${cachedDays.size} day${cachedDays.size === 1 ? '' : 's'} stored for ${user}/${device}`;
+      const daysWord = usage.daysWithData === 1 ? 'day' : 'days';
+      statusText = `Cache: ${usage.daysWithData.toLocaleString()} ${daysWord} with data for ${user}/${device}`;
       usageText = `${formatBytes(usage.selection)} / ${formatBytes(usage.total)} used`;
     } else if (storageEnabled && user && user !== ALL_SELECTOR) {
       // All Devices for one user: selection bytes = every device of that user
