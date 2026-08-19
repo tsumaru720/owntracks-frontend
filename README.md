@@ -116,7 +116,6 @@ It is recommended to view this document directly as the table is too wide for th
 | `APP_DISPLAY_LINES_COLOR` | `display.lines.color` | Default line color | No | `#3388ff` |
 | `APP_DISPLAY_LINES_WIDTH` | `display.lines.width` | Default line width | No | `3` |
 | `APP_DISPLAY_LINES_OPACITY` | `display.lines.opacity` | Default line opacity | No | `0.7` |
-| `APP_DISPLAY_LINES_SMOOTH` | `display.lines.smooth` | Smooth lines by default | No | `false` |
 | `APP_DISPLAY_ACCURACY_MAXMETERS` | `display.accuracy.maxMeters` | Max GPS accuracy filter (0 = all) | No | `0` |
 | `APP_DISPLAY_ALTITUDE_MIN` | `display.altitude.min` | Min altitude for gradient | No | `0` |
 | `APP_DISPLAY_ALTITUDE_MAX` | `display.altitude.max` | Max altitude for gradient | No | `1000` |
@@ -135,7 +134,6 @@ It is recommended to view this document directly as the table is too wide for th
 | `APP_DISPLAY_HEATMAP_GRADIENT_MIDCOLOR` | `display.heatmap.gradient.midColor` | Heatmap mid color | No | `#00ffff` |
 | `APP_DISPLAY_HEATMAP_GRADIENT_HIGHCOLOR` | `display.heatmap.gradient.highColor` | Heatmap high color | No | `#ff0000` |
 | `APP_DISPLAY_STORAGEENABLED` | `display.storageEnabled` | Cache data in browser | No | `true` |
-| `APP_PERFORMANCE_DYNAMICPOINTVISIBILITY` | `performance.dynamicPointVisibility` | Auto-adjust point density | No | `true` |
 | `APP_DEBUG_CONSOLELOGGING` | `debug.consoleLogging` | Enable console logging | No | `false` |
 
 ### Authentication Rules
@@ -199,7 +197,6 @@ services:
 
 ### Lines
 - Customize color/width/opacity (visibility via the quick actions dock)
-- Optional smoothing
 
 ### Altitude Gradient
 - Color points or lines by altitude
@@ -220,7 +217,6 @@ services:
 - Cache status shown when browser storage caching is enabled: days cached for the selection plus storage usage
 
 ### Debug Options
-- **Dynamic Point Visibility**: Toggle auto-density adjustment
 - **Console Logging**: Toggle console output
 - **Cache location data in browser**: Enable the persistent browser cache (see Data Caching below)
 - **Clear Device Cache**: Remove cached data for the selected user/device only
@@ -235,8 +231,10 @@ services:
 
 ## Performance
 
-- Zoom-based sampling targets ~3000 visible points
-- Points and lines use separate sampling rates
+- Canvas rendering with dedicated canvases for points and lines, so updating one layer never re-renders the other
+- Point markers are culled to the viewport when zoomed in (zoomed-out views draw the full set)
+- Route lines are sliced to the padded viewport and decimated with a sub-pixel tolerance (capped at 10k vertices per render via an adaptive tolerance), then re-sliced after zooms and large pans - so Leaflet's per-vertex line pipeline only ever sees the visible portion of the track; altitude-gradient lines are batched into one multi-part polyline per colour
+- Zoom-triggered line/heatmap redraws run debounced after the zoom settles
 - Uses `L.circleMarker` for efficient rendering
 - Auto-fits map bounds when data loads
 

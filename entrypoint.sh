@@ -41,7 +41,6 @@ jq -n '
     "APP_DISPLAY_LINES_COLOR": ["display", "lines", "color"],
     "APP_DISPLAY_LINES_WIDTH": ["display", "lines", "width"],
     "APP_DISPLAY_LINES_OPACITY": ["display", "lines", "opacity"],
-    "APP_DISPLAY_LINES_SMOOTH": ["display", "lines", "smooth"],
 
     "APP_DISPLAY_ACCURACY_MAXMETERS": ["display", "accuracy", "maxMeters"],
 
@@ -67,8 +66,6 @@ jq -n '
     "APP_DISPLAY_HEATMAP_GRADIENT_HIGHCOLOR": ["display", "heatmap", "gradient", "highColor"],
 
     "APP_DISPLAY_STORAGEENABLED": ["display", "storageEnabled"],
-
-    "APP_PERFORMANCE_DYNAMICPOINTVISIBILITY": ["performance", "dynamicPointVisibility"],
 
     "APP_DEBUG_CONSOLELOGGING": ["debug", "consoleLogging"]
   } as $map |

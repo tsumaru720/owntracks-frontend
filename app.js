@@ -17,7 +17,9 @@
     layers: {
       points: null,
       lines: null,
-      heatmap: null
+      heatmap: null,
+      pointRenderer: null,
+      lineRenderer: null
     },
     data: {
       raw: [],           // All points from API
@@ -51,6 +53,27 @@
 
   function logError(...args) {
     console.error(...args);
+  }
+
+  // Trailing-edge debounce. flush() invokes a still-pending call
+  // immediately (e.g. on 'change' after a run of continuous 'input'
+  // events).
+  function debounce(fn, wait) {
+    let timeout = null;
+    const debounced = (...args) => {
+      clearTimeout(timeout);
+      timeout = setTimeout(() => {
+        timeout = null;
+        fn(...args);
+      }, wait);
+    };
+    debounced.flush = (...args) => {
+      if (timeout === null) return;
+      clearTimeout(timeout);
+      timeout = null;
+      fn(...args);
+    };
+    return debounced;
   }
 
   // ============================================================================
@@ -237,7 +260,6 @@
     'lineColor': 'display.lines.color',
     'lineWidth': 'display.lines.width',
     'lineOpacity': 'display.lines.opacity',
-    'smoothLines': 'display.lines.smooth',
     // Accuracy
     'accuracyMaxMeters': 'display.accuracy.maxMeters',
     // Altitude Points
@@ -275,10 +297,6 @@
       if (value !== undefined) {
         return value;
       }
-    }
-
-    if (key === 'dynamicPointVisibility' && window.CONFIG.performance?.dynamicPointVisibility !== undefined) {
-      return window.CONFIG.performance.dynamicPointVisibility;
     }
 
     if (key === 'consoleLoggingEnabled' && window.CONFIG.debug?.consoleLogging !== undefined) {
@@ -321,7 +339,11 @@
       zoomControl: false,
       attributionControl: false,
       zoomSnap: 0, // Allow fractional zoom levels for smoother transitions
-      wheelPxPerZoomLevel: 60 // Slower scroll zoom
+      wheelPxPerZoomLevel: 60, // Slower scroll zoom
+      // Canvas renderer: one canvas bitmap instead of a DOM node per
+      // marker/polyline - essential at 100k+ points where SVG's per-node
+      // updates freeze the map on every zoom
+      preferCanvas: true
     }).setView([0, 0], 2);
 
     L.control.zoom({
@@ -335,22 +357,46 @@
 
     updateTileLayer();
 
-    // Debounced redraw to avoid performance issues during continuous zooming
-    let zoomRedrawTimeout = null;
-    const handleZoomChange = () => {
-      clearTimeout(zoomRedrawTimeout);
-      zoomRedrawTimeout = setTimeout(() => {
-        if (state.data.filtered.length > 0) {
-          redrawMap();
-        }
-      }, 200); // 200ms delay after zoom stops
-    };
-    state.map.on('zoomend', handleZoomChange);
+    // After a zoom settles, re-slice the lines (the pixel tolerance and
+    // visible region change with zoom); the heatmap rebuild shares the
+    // same debounce. Zooms also fire moveend, which handles any
+    // coverage-driven marker/line work synchronously.
+    const redrawLinesOnZoom = debounce(() => {
+      if (state.data.filtered.length === 0) return;
+      if (lineTracks.length > 0) renderLines();
+      if (getSetting('heatmapEnabled', false)) {
+        drawHeatmap(state.data.filtered);
+      }
+    }, 150);
+    state.map.on('zoomend', () => {
+      if (state.data.filtered.length > 0) redrawLinesOnZoom();
+    });
+
+    // Re-cull point markers and re-slice the line layer when the view
+    // leaves the region covered by the last render. Both are padded
+    // well beyond the viewport, so this only fires on larger moves.
+    state.map.on('moveend', () => {
+      if (state.data.filtered.length === 0) return;
+      if (pointSliceBounds && !viewCoveredBy(pointSliceBounds)) {
+        renderPoints();
+      }
+      if (lineTracks.length > 0 && !viewCoveredBy(lineSliceBounds)) {
+        renderLines();
+      }
+    });
 
     // Order: Heatmap (bottom), Lines (middle), Points (top)
     state.layers.points = L.layerGroup([], { zIndex: 400 }).addTo(state.map);
     state.layers.lines = L.layerGroup([], { zIndex: 300 }).addTo(state.map);
     state.layers.heatmap = null; // Will be created with zIndex: 200 when needed
+
+    // Dedicated canvases for points and lines. A shared canvas couples
+    // them: every layer update forces a redraw pass over all layers on
+    // that canvas, so a line re-slice would re-project every point
+    // marker too. Separate renderers decouple update costs. Both are
+    // added to the map lazily by Leaflet when first used.
+    state.layers.pointRenderer = L.canvas();
+    state.layers.lineRenderer = L.canvas();
 
     // Add proximity click handler for easier point interaction
     state.map.on('click', handleProximityClick);
@@ -796,6 +842,9 @@
     const bindSettingColor = (id, defaultValue) => {
       const text = document.getElementById(id);
       const picker = document.getElementById(id + 'Picker');
+      // 'input' fires continuously while dragging the colour wheel -
+      // save immediately but throttle the full redraw
+      const redrawDebounced = debounce(redrawMap, 200);
       text.addEventListener('change', (e) => {
         picker.value = e.target.value;
         saveSetting(id, e.target.value, defaultValue);
@@ -804,8 +853,10 @@
       picker.addEventListener('input', (e) => {
         text.value = e.target.value;
         saveSetting(id, e.target.value, defaultValue);
-        redrawMap();
+        redrawDebounced();
       });
+      // Colour selection committed - apply now if a redraw is pending
+      picker.addEventListener('change', () => redrawDebounced.flush());
     };
 
     // Display options
@@ -815,16 +866,21 @@
     bindSettingColor('lineColor', '#3388ff');
     bindSettingInput('lineWidth', 3, parseInt);
     bindSettingInput('lineOpacity', 0.7);
-    bindSettingCheckbox('smoothLines', false);
 
-    // Accuracy filter
+    // Accuracy filter: the label updates live while dragging, but the
+    // filter + full redraw over every loaded point is debounced and
+    // flushed once the slider is released
+    const applyAccuracyDebounced = debounce(() => {
+      applyAccuracyFilter();
+      redrawMap();
+    }, 250);
     document.getElementById('accuracySlider').addEventListener('input', (e) => {
       const value = parseInt(e.target.value);
       document.getElementById('accuracyValue').textContent = value;
       saveSetting('accuracyMaxMeters', value, 0);
-      applyAccuracyFilter();
-      redrawMap();
+      applyAccuracyDebounced();
     });
+    document.getElementById('accuracySlider').addEventListener('change', () => applyAccuracyDebounced.flush());
 
     // Altitude gradient
     bindSettingCheckbox('altitudeEnabled', false);
@@ -966,9 +1022,6 @@
       }
     });
 
-    // Dynamic point visibility
-    bindSettingCheckbox('dynamicPointVisibility', true);
-
     // Console logging (no redraw needed)
     bindSettingCheckbox('consoleLoggingEnabled', false, () => {});
 
@@ -1020,12 +1073,10 @@
 
     // Checkboxes: [id, default]
     const checkboxes = [
-      ['smoothLines', false],
       ['altitudeEnabled', false],
       ['altitudeLinesEnabled', false],
       ['storageEnabled', true],
       ['autoFitToBounds', true],
-      ['dynamicPointVisibility', true],
       ['consoleLoggingEnabled', false]
     ];
     checkboxes.forEach(([id, def]) => {
@@ -1095,13 +1146,6 @@
     helpOverlayReturnFocus = null;
   }
 
-  function toggleDynamicPointVisibility() {
-    const next = !getSetting('dynamicPointVisibility', true);
-    saveSetting('dynamicPointVisibility', next, true);
-    document.getElementById('dynamicPointVisibility').checked = next;
-    redrawMap();
-  }
-
   function handleShortcutKey(e) {
     // Never intercept browser/OS combos like Ctrl+L or Cmd+P
     if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -1149,11 +1193,6 @@
       case 'F':
         e.preventDefault();
         if (state.data.filtered.length > 0) fitMapToBounds();
-        break;
-      case 'd':
-      case 'D':
-        e.preventDefault();
-        toggleDynamicPointVisibility();
         break;
     }
   }
@@ -1325,6 +1364,8 @@
           // Remove collapsed class FIRST to restore padding
           toggle.classList.remove('collapsed');
           animateExpand(content);
+          // Viewport counts are skipped while the section is hidden
+          if (sectionName === 'stats') updateViewportStats();
         }
       });
     });
@@ -1529,7 +1570,11 @@
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
     const result = `${year}-${month}-${day}`;
-    log(`[Date Debug] UTC timestamp ${utcTimestamp} (${date.toISOString()}) -> Local date: ${result}`);
+    // Hot per-point call path - the debug string (incl. toISOString) is
+    // only built when logging is actually enabled
+    if (getSetting('consoleLoggingEnabled', false)) {
+      log(`[Date Debug] UTC timestamp ${utcTimestamp} (${date.toISOString()}) -> Local date: ${result}`);
+    }
     return result;
   }
 
@@ -2098,10 +2143,10 @@
       // Check if storage is enabled
       const storageEnabled = getSetting('storageEnabled', true);
 
-      let allData = [];
       let cachedPointCount = 0;
       let freshPointCount = 0;
       const multi = combos.length > 1;
+      const comboChunks = [];
 
       for (let i = 0; i < combos.length; i++) {
         const { user, device } = combos[i];
@@ -2117,20 +2162,33 @@
           point.device = device;
         });
 
+        // Timestamp order within a combo: a numeric per-combo sort is far
+        // cheaper than a locale-aware (user, device, tst) comparator run
+        // against every point
+        comboResult.data.sort((a, b) => a.tst - b.tst);
+
         cachedPointCount += comboResult.cachedCount;
         freshPointCount += comboResult.freshCount;
-        allData = allData.concat(comboResult.data);
+        comboChunks.push(comboResult.data);
       }
 
-      // Keep each user/device track contiguous so route lines don't jump
-      // between devices
-      allData.sort((a, b) => {
-        const userCmp = String(a.user || '').localeCompare(String(b.user || ''));
+      // Combos were fetched in list order - order them alphabetically so
+      // each user/device track stays contiguous (route lines don't jump
+      // between devices)
+      comboChunks.sort((a, b) => {
+        const userCmp = String(a[0]?.user || '').localeCompare(String(b[0]?.user || ''));
         if (userCmp !== 0) return userCmp;
-        const deviceCmp = String(a.device || '').localeCompare(String(b.device || ''));
-        if (deviceCmp !== 0) return deviceCmp;
-        return a.tst - b.tst;
+        return String(a[0]?.device || '').localeCompare(String(b[0]?.device || ''));
       });
+
+      // Push rather than concat - repeated concat re-copies the whole
+      // array per combo, and a large spread exceeds the argument limit
+      const allData = [];
+      for (const chunk of comboChunks) {
+        for (let i = 0; i < chunk.length; i++) {
+          allData.push(chunk[i]);
+        }
+      }
       state.data.raw = allData;
 
       // Store source breakdown for indicator
@@ -2203,7 +2261,14 @@
     state.data.maxAccuracy = 0;
     state.data.timeRange = { start: null, end: null };
     state.data.sourceBreakdown = { cached: 0, fresh: 0 };
-    redrawMap();
+    lineTracks = [];
+    lineSliceBounds = null;
+    pointSliceBounds = null;
+    state.layers.points.clearLayers();
+    state.layers.lines.clearLayers();
+    removeHeatmap();
+    invalidateProjectedPointCache();
+    document.getElementById('statVisible').textContent = '0';
     updateStats();
     document.getElementById('qaRecenter').disabled = true;
   }
@@ -2702,6 +2767,7 @@
       });
     }
 
+    invalidateProjectedPointCache();
     updateStats();
   }
 
@@ -2731,33 +2797,28 @@
     };
   }
 
-  // Point sampling rate for the current zoom/dataset size - shared by
-  // redrawMap, handleProximityClick and updateViewportStats so all three
-  // agree on which points are "drawn". 1 = draw everything.
-  function getPointSampleRate() {
-    const totalPoints = state.data.filtered.length;
-    if (!getSetting('dynamicPointVisibility', true) || totalPoints <= 2000) {
-      return 1;
-    }
+  // Split the filtered points into contiguous per user/device tracks so
+  // route lines stay within one device instead of drawing a connecting
+  // segment wherever the data switches user/device
+  function splitIntoTracks(points) {
+    const tracks = [];
+    let current = [];
+    let currentUser;
+    let currentDevice;
 
-    // Higher zoom = more detail, lower zoom = more aggressive sampling
-    const zoom = state.map.getZoom();
-    const zoomFactor = Math.max(0.05, (zoom - 2) / 14); // 0.05 to 1.0 based on zoom
-    const densityFactor = Math.max(0.1, 3000 / totalPoints); // Target ~3000 visible points
-    const combinedFactor = zoomFactor * densityFactor;
-
-    if (combinedFactor < 0.01) {
-      // Very zoomed out: aggressive sampling
-      return Math.max(10, Math.min(50, Math.ceil(100 * combinedFactor / 2)));
-    } else if (combinedFactor < 0.05) {
-      // Zoomed out: moderate sampling
-      return Math.max(5, Math.min(20, Math.ceil(1 / combinedFactor / 2)));
-    } else if (combinedFactor < 0.15) {
-      // Mid zoom: light sampling
-      return Math.max(2, Math.min(10, Math.ceil(1 / combinedFactor / 3)));
+    for (let i = 0; i < points.length; i++) {
+      const p = points[i];
+      if (current.length > 0 && (p.user !== currentUser || p.device !== currentDevice)) {
+        tracks.push(current);
+        current = [];
+      }
+      currentUser = p.user;
+      currentDevice = p.device;
+      current.push(p);
     }
-    // Zoomed in: show all points
-    return 1;
+    if (current.length > 0) tracks.push(current);
+
+    return tracks;
   }
 
   function redrawMap() {
@@ -2765,206 +2826,417 @@
 
     state.layers.points.clearLayers();
     state.layers.lines.clearLayers();
+    removeHeatmap();
+
+    // Point markers: culled to the padded viewport by renderPoints()
+    // when most points are off-screen
+    renderPoints();
+
+    // Line layer: tracks are fixed here (data only); renderLines()
+    // re-slices them against the current view - cheap enough to run on
+    // every zoom or long pan without a full redraw
+    lineTracks = getSetting('showLines', true) && state.data.filtered.length > 1
+      ? splitIntoTracks(state.data.filtered)
+      : [];
+    renderLines();
+
+    // Draw heatmap
+    if (getSetting('heatmapEnabled', false) && state.data.filtered.length > 0) {
+      drawHeatmap(state.data.filtered);
+    }
+
+    // Update visible count - only points in viewport
+    document.getElementById('statVisible').textContent = countPointsInViewport().toLocaleString();
+  }
+
+  // ============================================================================
+  // Point Marker Rendering (viewport culling)
+  // ============================================================================
+
+  // Padded viewport bounds recorded by the last point render; when the
+  // view leaves this region the markers are re-culled. null = markers
+  // cover the whole world (no culling in effect)
+  let pointSliceBounds = null;
+
+  // True when the current view lies entirely inside the given slice
+  // bounds recorded by an earlier render
+  function viewCoveredBy(slice) {
+    if (!slice) return false;
+    const b = state.map.getBounds();
+    return b.getSouth() >= slice.south &&
+      b.getNorth() <= slice.north &&
+      (slice.wraps ||
+        (b.getWest() >= slice.west && b.getEast() <= slice.east));
+  }
+
+  // Wrap-aware containment predicate shared by point culling, line
+  // slicing and the viewport stats scan
+  function makeBoundsTest(west, east, north, south) {
+    const wraps = west > east; // region crossing the antimeridian
+    return (p) => p.lat >= south && p.lat <= north &&
+      (wraps
+        ? (p.lon >= west || p.lon <= east)
+        : (p.lon >= west && p.lon <= east));
+  }
+
+  // Rebuild the point marker layer. When most points are off-screen
+  // (zoomed in), only markers within the padded viewport are created -
+  // Leaflet's canvas redraws every layer it holds on each zoom, so
+  // holding 78k markers when a few hundred are visible is what made
+  // zooming into a cluster crawl. When most points ARE visible the full
+  // set is drawn (no culling) so zoomed-out behaviour is unchanged and
+  // no re-culling churn is introduced while panning around at low zoom.
+  function renderPoints() {
+    if (!state.map) return;
+    state.layers.points.clearLayers();
+
+    const points = state.data.filtered;
+    if (!getSetting('showPoints', true) || points.length === 0) {
+      pointSliceBounds = null;
+      return;
+    }
+
+    const altitudeEnabled = getSetting('altitudeEnabled', false);
+    const pointColor = getSetting('pointColor', '#3388ff');
+    const pointSize = getSetting('pointSize', 2);
+    const pointOpacity = getSetting('pointOpacity', 0.5);
+    const altMin = getSetting('altitudeMin', 0);
+    const altMax = getSetting('altitudeMax', 1000);
+    // Precomputed gradient - per-point colour work is an array index
+    // instead of hex parsing + string building
+    const pointsLUT = altitudeEnabled
+      ? buildAltitudeColorLUT(
+          getSetting('altitudePointsLowColor', '#00ff00'),
+          getSetting('altitudePointsHighColor', '#ff0000'))
+      : null;
+    const altRange = (altMax - altMin) || 1;
+
+    // Decide culling: pad the viewport by 50% and count how many
+    // points fall inside (numeric compares only)
+    const b = state.map.getBounds().pad(0.5);
+    const west = b.getWest();
+    const east = b.getEast();
+    const north = b.getNorth();
+    const south = b.getSouth();
+    const wraps = west > east;
+
+    const inPaddedView = makeBoundsTest(west, east, north, south);
+
+    let total = 0;
+    let inViewCount = 0;
+    for (let i = 0; i < points.length; i++) {
+      total++;
+      if (inPaddedView(points[i])) inViewCount++;
+    }
+
+    // Culling only pays when most points are off-screen; otherwise draw
+    // everything and mark coverage as world-wide to avoid re-cull churn
+    const cull = inViewCount < total * 0.7;
+    pointSliceBounds = cull
+      ? { west, east, north, south, wraps }
+      : { west: -180, east: 180, north: 90, south: -90, wraps: false };
+
+    for (let i = 0; i < points.length; i++) {
+      const point = points[i];
+      if (cull && !inPaddedView(point)) continue;
+
+      let color = pointColor;
+      if (pointsLUT && point.alt !== undefined && point.alt !== null) {
+        const t = (point.alt - altMin) / altRange;
+        color = pointsLUT[t <= 0 ? 0 : t >= 1 ? 255 : (t * 255) | 0];
+      }
+
+      state.layers.points.addLayer(createPointMarker(point.lat, point.lon, {
+        fillColor: color,
+        radius: pointSize,
+        opacity: pointOpacity
+      }));
+    }
+  }
+
+  // ============================================================================
+  // Line Rendering (viewport slicing)
+  // ============================================================================
+
+  // Contiguous per user/device tracks for the line layer; rebuilt by
+  // redrawMap when the data changes
+  let lineTracks = [];
+  // Padded viewport bounds recorded by the last slice, used to decide
+  // when a pan has left the sliced region
+  let lineSliceBounds = null;
+
+  // Upper bound on line vertices handed to Leaflet per render. Leaflet
+  // re-runs its per-vertex pipeline (project + clip + draw) over every
+  // vertex on the canvas at each zoom change, so this cap is what keeps
+  // zooming responsive in the densest clusters; the adaptive tolerance
+  // softens just enough to get under it
+  const LINE_VERTEX_CAP = 10000;
+
+  // Slice tracks to the padded viewport and decimate to roughly the
+  // given pixel tolerance, so the polyline handed to Leaflet is
+  // proportional to the visible screen area rather than the total
+  // dataset. Leaflet's per-vertex pipeline over every loaded point is
+  // what made line redraws after zoom take ~1s at 78k points.
+  function computeLineSlices() {
+    const b = state.map.getBounds().pad(0.5);
+    const west = b.getWest();
+    const east = b.getEast();
+    const north = b.getNorth();
+    const south = b.getSouth();
+    const wraps = west > east; // padded viewport crossing the antimeridian
+    lineSliceBounds = { west, east, north, south, wraps };
+    const inView = makeBoundsTest(west, east, north, south);
+
+    const worldPx = 256 * Math.pow(2, state.map.getZoom());
+
+    // One decimation pass at a given pixel tolerance. The tolerance is
+    // expressed in degrees of longitude; latitude distances are scaled
+    // per point by the local Mercator factor (1/cos(lat)).
+    const sliceAt = (tolPx) => {
+      const tolSq = Math.pow(tolPx * 360 / worldPx, 2);
+      const slices = [];
+
+      for (const track of lineTracks) {
+        let run = null; // current visible run of source points
+        let lastLat = 0;
+        let lastLng = 0;
+
+        const flush = () => {
+          if (run && run.length > 1) slices.push(run);
+          run = null;
+        };
+
+        for (let i = 0; i < track.length; i++) {
+          const p = track[i];
+
+          if (!inView(p)) {
+            // Keep one out-of-view point at a boundary crossing so the
+            // visible end of the track still connects correctly (the
+            // renderer clips it at the canvas edge)
+            if (run) {
+              run.push(p);
+              flush();
+            }
+            continue;
+          }
+
+          // First point of a run is always kept
+          if (!run) {
+            run = [p];
+            lastLat = p.lat;
+            lastLng = p.lon;
+            continue;
+          }
+
+          // Distance from the last kept point in longitude-degree
+          // equivalents: latitude is scaled by the Mercator factor so
+          // the comparison matches the on-screen pixel tolerance
+          const dy = (p.lat - lastLat) / Math.cos(p.lat * Math.PI / 180);
+          const dx = p.lon - lastLng;
+          if (dx * dx + dy * dy >= tolSq) {
+            run.push(p);
+            lastLat = p.lat;
+            lastLng = p.lon;
+          }
+        }
+        flush();
+      }
+
+      let verts = 0;
+      for (const s of slices) verts += s.length;
+      return { slices, verts };
+    };
+
+    // Start at a sub-pixel tolerance (visually lossless) and only
+    // escalate while the slice would still exceed the vertex cap
+    let tolPx = 0.5;
+    let sliced = sliceAt(tolPx);
+    while (sliced.verts > LINE_VERTEX_CAP) {
+      tolPx *= Math.max(1.5, Math.sqrt(sliced.verts / LINE_VERTEX_CAP));
+      sliced = sliceAt(tolPx);
+    }
+    return sliced;
+  }
+
+  function renderLines() {
+    if (!state.map) return;
+    state.layers.lines.clearLayers();
+    if (lineTracks.length === 0) return;
+
+    // Shared polyline style. smoothFactor 0 keeps every slice vertex -
+    // Leaflet's default of 1 would re-simplify the already-sliced
+    // geometry at every zoom level
+    const lineStyle = {
+      color: getSetting('lineColor', '#3388ff'),
+      weight: getSetting('lineWidth', 3),
+      opacity: getSetting('lineOpacity', 0.7),
+      smoothFactor: 0,
+      renderer: state.layers.lineRenderer,
+      interactive: false
+    };
+
+    const { slices, verts: sliceVerts } = computeLineSlices();
+    if (sliceVerts === 0) return;
+
+    if (!getSetting('altitudeLinesEnabled', false)) {
+      for (const slice of slices) {
+        L.polyline(slice.map(p => [p.lat, p.lon]), lineStyle).addTo(state.layers.lines);
+      }
+      return;
+    }
+
+    // Altitude gradient: one multi-part polyline per gradient colour -
+    // the canvas renderer strokes one path per layer, not per segment
+    const linesLUT = buildAltitudeColorLUT(
+      getSetting('altitudeLinesLowColor', '#00ff00'),
+      getSetting('altitudeLinesHighColor', '#ff0000')
+    );
+    const altMin = getSetting('altitudeMin', 0);
+    const altMax = getSetting('altitudeMax', 1000);
+    const altRange = (altMax - altMin) || 1;
+    const segmentsByColor = new Map();
+
+    for (const slice of slices) {
+      for (let i = 0; i < slice.length - 1; i++) {
+        const p1 = slice[i];
+        const p2 = slice[i + 1];
+
+        const t = ((p1.alt || 0) - altMin) / altRange;
+        const color = linesLUT[t <= 0 ? 0 : t >= 1 ? 255 : (t * 255) | 0];
+
+        let parts = segmentsByColor.get(color);
+        if (!parts) {
+          parts = [];
+          segmentsByColor.set(color, parts);
+        }
+        parts.push([[p1.lat, p1.lon], [p2.lat, p2.lon]]);
+      }
+    }
+
+    for (const [color, parts] of segmentsByColor) {
+      L.polyline(parts, { ...lineStyle, color }).addTo(state.layers.lines);
+    }
+  }
+
+  function removeHeatmap() {
     if (state.layers.heatmap) {
       state.map.removeLayer(state.layers.heatmap);
       state.layers.heatmap = null;
     }
-
-    const showPoints = getSetting('showPoints', true);
-    const showLines = getSetting('showLines', true);
-    const heatmapEnabled = getSetting('heatmapEnabled', false);
-    const altitudeEnabled = getSetting('altitudeEnabled', false);
-    const altitudeLinesEnabled = getSetting('altitudeLinesEnabled', false);
-
-    const pointColor = getSetting('pointColor', '#3388ff');
-    const lineColor = getSetting('lineColor', '#3388ff');
-
-    const pointSize = getSetting('pointSize', 2);
-    const pointOpacity = getSetting('pointOpacity', 0.5);
-    const lineWidth = getSetting('lineWidth', 3);
-    const lineOpacity = getSetting('lineOpacity', 0.7);
-    const smoothLines = getSetting('smoothLines', false);
-
-    const altMin = getSetting('altitudeMin', 0);
-    const altMax = getSetting('altitudeMax', 1000);
-    const altPointsLowColor = getSetting('altitudePointsLowColor', '#00ff00');
-    const altPointsHighColor = getSetting('altitudePointsHighColor', '#ff0000');
-    const altLinesLowColor = getSetting('altitudeLinesLowColor', '#00ff00');
-    const altLinesHighColor = getSetting('altitudeLinesHighColor', '#ff0000');
-
-    // Calculate smart sample rate considering both zoom level and point count
-    const totalPoints = state.data.filtered.length;
-    const pointSampleRate = getPointSampleRate();
-
-    // Lines sample less aggressively - cheaper to render, and route
-    // continuity matters even when points are sampled
-    let lineSampleRate = 1;
-    if (getSetting('dynamicPointVisibility', true) && totalPoints > 20000) {
-      if (totalPoints > 50000) {
-        lineSampleRate = Math.max(2, Math.min(pointSampleRate / 2, 5));
-      } else {
-        lineSampleRate = Math.max(2, Math.min(pointSampleRate / 3, 3));
-      }
-    }
-
-    const sampledForPoints = state.data.filtered.filter((_, i) => i % pointSampleRate === 0);
-    const sampledForLines = state.data.filtered.filter((_, i) => i % lineSampleRate === 0);
-
-    // Draw points
-    if (showPoints) {
-      sampledForPoints.forEach(point => {
-        let color = pointColor;
-        let fillColor = pointColor;
-
-        if (altitudeEnabled && point.alt !== undefined && point.alt !== null) {
-          color = getAltitudeColor(point.alt, altMin, altMax, altPointsLowColor, altPointsHighColor);
-          fillColor = color;
-        }
-
-        const marker = createPointMarker(point.lat, point.lon, {
-          color,
-          fillColor,
-          radius: pointSize,
-          opacity: pointOpacity
-        });
-
-        const popupContent = createPopupContent(point);
-        marker.bindPopup(popupContent);
-
-        state.layers.points.addLayer(marker);
-      });
-    }
-
-    // Draw lines - simplified for better performance
-    if (showLines && sampledForLines.length > 1) {
-      // If no altitude gradient, draw single polyline (much faster)
-      if (!altitudeLinesEnabled) {
-        const latlngs = sampledForLines.map(p => [p.lat, p.lon]);
-        L.polyline(latlngs, {
-          color: lineColor,
-          weight: lineWidth,
-          opacity: lineOpacity,
-          smoothFactor: smoothLines ? 1 : 0
-        }).addTo(state.layers.lines);
-      } else {
-        // Altitude gradient: use segments (slower but necessary for per-segment colors)
-        const latlngs = [];
-        const colors = [];
-
-        for (let i = 0; i < sampledForLines.length - 1; i++) {
-          const p1 = sampledForLines[i];
-          const p2 = sampledForLines[i + 1];
-
-          if (!p1 || !p2) continue;
-
-          latlngs.push([[p1.lat, p1.lon], [p2.lat, p2.lon]]);
-
-          const segmentColor = getAltitudeColor(
-            p1.alt || 0, altMin, altMax,
-            altLinesLowColor, altLinesHighColor
-          );
-          colors.push(segmentColor);
-        }
-
-        // Draw each segment with its color
-        latlngs.forEach((segment, i) => {
-          L.polyline(segment, {
-            color: colors[i],
-            weight: lineWidth,
-            opacity: lineOpacity,
-            smoothFactor: 0 // No smoothing for segments
-          }).addTo(state.layers.lines);
-        });
-      }
-    }
-
-    // Draw heatmap
-    if (heatmapEnabled && sampledForPoints.length > 0) {
-      const heatmapData = sampledForPoints
-        .filter(p => p.lat && p.lon)
-        .map(p => [p.lat, p.lon, 0.5]);
-
-      // Dynamic radius and blur based on zoom level
-      const zoom = state.map.getZoom();
-      const baseRadius = getSetting('heatmapRadius', 25);
-      const baseBlur = getSetting('heatmapBlur', 15);
-
-      // Adjust radius/blur by zoom: more detail when close, more coverage when far
-      let zoomAdjustedRadius = baseRadius;
-      let zoomAdjustedBlur = baseBlur;
-
-      if (zoom < 8) {
-        // Far zoom - increase radius and blur for better coverage
-        zoomAdjustedRadius = baseRadius * 1.5;
-        zoomAdjustedBlur = baseBlur * 1.3;
-      } else if (zoom > 14) {
-        // Close zoom - decrease radius and blur for more detail
-        zoomAdjustedRadius = baseRadius * 0.7;
-        zoomAdjustedBlur = baseBlur * 0.8;
-      }
-
-      state.layers.heatmap = L.heatLayer(heatmapData, {
-        radius: zoomAdjustedRadius,
-        blur: zoomAdjustedBlur,
-        minOpacity: getSetting('heatmapMinOpacity', 0.05),
-        maxZoom: getSetting('heatmapMaxZoom', 18), // Limit max zoom for heatmap performance
-        gradient: buildHeatmapGradient(
-          getSetting('heatmapLowColor', '#0000ff'),
-          getSetting('heatmapMidColor', '#00ffff'),
-          getSetting('heatmapHighColor', '#ff0000')
-        ),
-        zIndex: 200 // Bottom layer
-      }).addTo(state.map);
-    }
-
-    // Update visible count - only points in viewport
-    const visibleInViewport = countPointsInViewport(sampledForPoints);
-    document.getElementById('statVisible').textContent = visibleInViewport.toLocaleString();
   }
 
-  // Count points that are currently visible in the map viewport
-  function countPointsInViewport(points) {
-    if (!state.map || points.length === 0) return 0;
+  // Heat layer only - used directly on zoom, where the zoom-adjusted
+  // radius/blur need rebuilding but points/lines do not
+  function drawHeatmap(points) {
+    removeHeatmap();
 
-    const bounds = state.map.getBounds();
+    const heatmapData = [];
+    for (let i = 0; i < points.length; i++) {
+      const p = points[i];
+      if (p.lat && p.lon) {
+        heatmapData.push([p.lat, p.lon, 0.5]);
+      }
+    }
+    if (heatmapData.length === 0) return;
+
+    // Dynamic radius and blur based on zoom level
+    const zoom = state.map.getZoom();
+    const baseRadius = getSetting('heatmapRadius', 25);
+    const baseBlur = getSetting('heatmapBlur', 15);
+
+    // Adjust radius/blur by zoom: more detail when close, more coverage when far
+    let zoomAdjustedRadius = baseRadius;
+    let zoomAdjustedBlur = baseBlur;
+
+    if (zoom < 8) {
+      // Far zoom - increase radius and blur for better coverage
+      zoomAdjustedRadius = baseRadius * 1.5;
+      zoomAdjustedBlur = baseBlur * 1.3;
+    } else if (zoom > 14) {
+      // Close zoom - decrease radius and blur for more detail
+      zoomAdjustedRadius = baseRadius * 0.7;
+      zoomAdjustedBlur = baseBlur * 0.8;
+    }
+
+    state.layers.heatmap = L.heatLayer(heatmapData, {
+      radius: zoomAdjustedRadius,
+      blur: zoomAdjustedBlur,
+      minOpacity: getSetting('heatmapMinOpacity', 0.05),
+      maxZoom: getSetting('heatmapMaxZoom', 18), // Limit max zoom for heatmap performance
+      gradient: buildHeatmapGradient(
+        getSetting('heatmapLowColor', '#0000ff'),
+        getSetting('heatmapMidColor', '#00ffff'),
+        getSetting('heatmapHighColor', '#ff0000')
+      ),
+      zIndex: 200 // Bottom layer
+    }).addTo(state.map);
+  }
+
+  // Stats section toggle, cached - lets the per-move viewport count skip
+  // work entirely while the section is collapsed
+  let statsToggleEl = null;
+
+  function statsSectionCollapsed() {
+    if (!statsToggleEl) {
+      statsToggleEl = document.querySelector('.section-toggle[data-section="stats"]');
+    }
+    return statsToggleEl ? statsToggleEl.classList.contains('collapsed') : false;
+  }
+
+  // Count the points currently visible in the map viewport, with raw
+  // bounds comparisons - no LatLng allocation per point.
+  function countPointsInViewport() {
+    if (!state.map || state.data.filtered.length === 0) return 0;
+    if (statsSectionCollapsed()) return 0; // hidden - skip the scan
+
+    const b = state.map.getBounds();
+    const inView = makeBoundsTest(b.getWest(), b.getEast(), b.getNorth(), b.getSouth());
+
+    const points = state.data.filtered;
     let count = 0;
 
-    for (const point of points) {
-      if (bounds.contains([point.lat, point.lon])) {
-        count++;
-      }
+    for (let i = 0; i < points.length; i++) {
+      if (inView(points[i])) count++;
     }
 
     return count;
   }
 
   function createPointMarker(lat, lng, options) {
-    const { color = '#3388ff', fillColor = '#3388ff', radius = 2, opacity = 0.5 } = options;
+    const { fillColor = '#3388ff', radius = 2, opacity = 0.5 } = options;
 
+    // No stroke (weight 0) halves the paint cost per circle, and
+    // non-interactive markers keep the canvas renderer's hover/click
+    // hit-testing from scanning every point on each mouse event - map
+    // clicks are handled by handleProximityClick instead
     return L.circleMarker([lat, lng], {
       radius,
       fillColor,
-      color,
-      weight: 1,
-      opacity: opacity + 0.3,  // stroke is slightly more opaque
-      fillOpacity: opacity
+      fillOpacity: opacity,
+      weight: 0,
+      renderer: state.layers.pointRenderer,
+      interactive: false
     });
   }
 
-  function getAltitudeColor(alt, min, max, lowColor, highColor) {
-    const normalized = Math.max(0, Math.min(1, (alt - min) / (max - min)));
-    return interpolateColor(lowColor, highColor, normalized);
-  }
+  // 256-step colour lookup table between two hex colours. Built once per
+  // redraw so per-point altitude colouring is an index lookup rather
+  // than hex parsing + string building per point.
+  function buildAltitudeColorLUT(lowColor, highColor) {
+    const c1 = hexToRgb(lowColor);
+    const c2 = hexToRgb(highColor);
+    const lut = new Array(256);
 
-  function interpolateColor(color1, color2, factor) {
-    const c1 = hexToRgb(color1);
-    const c2 = hexToRgb(color2);
+    for (let i = 0; i < 256; i++) {
+      const t = i / 255;
+      lut[i] = rgbToHex(
+        Math.round(c1.r + t * (c2.r - c1.r)),
+        Math.round(c1.g + t * (c2.g - c1.g)),
+        Math.round(c1.b + t * (c2.b - c1.b))
+      );
+    }
 
-    const r = Math.round(c1.r + factor * (c2.r - c1.r));
-    const g = Math.round(c1.g + factor * (c2.g - c1.g));
-    const b = Math.round(c1.b + factor * (c2.b - c1.b));
-
-    return rgbToHex(r, g, b);
+    return lut;
   }
 
   function hexToRgb(hex) {
@@ -3020,9 +3292,16 @@
   function fitMapToBounds() {
     if (state.data.filtered.length === 0) return;
 
-    const bounds = L.latLngBounds(
-      state.data.filtered.map(p => [p.lat, p.lon])
-    );
+    // Single min/max pass - avoids materialising a [lat, lon] array for
+    // every point just to derive the bounds
+    let minLat = Infinity, minLng = Infinity, maxLat = -Infinity, maxLng = -Infinity;
+    for (const p of state.data.filtered) {
+      if (p.lat < minLat) minLat = p.lat;
+      if (p.lat > maxLat) maxLat = p.lat;
+      if (p.lon < minLng) minLng = p.lon;
+      if (p.lon > maxLng) maxLng = p.lon;
+    }
+    const bounds = L.latLngBounds([minLat, minLng], [maxLat, maxLng]);
 
     // When the sidebar is open, pad left by its width to keep data visible
     const sidebar = document.getElementById('sidebar');
@@ -3055,30 +3334,55 @@
     });
   }
 
+  // Projected layer points for the current zoom, cached until the zoom
+  // or the data changes. Layer points don't depend on panning, so this
+  // lets clicks compare in pixel space without re-projecting every
+  // point on each click.
+  let projectedPointCache = null; // Float64Array [x0, y0, x1, y1, ...]
+  let projectedPointCacheZoom = null;
+
+  function invalidateProjectedPointCache() {
+    projectedPointCache = null;
+    projectedPointCacheZoom = null;
+  }
+
+  function getProjectedPoints() {
+    const zoom = state.map.getZoom();
+    if (projectedPointCacheZoom !== zoom || !projectedPointCache) {
+      const points = state.data.filtered;
+      const cache = new Float64Array(points.length * 2);
+      for (let i = 0; i < points.length; i++) {
+        const lp = state.map.latLngToLayerPoint([points[i].lat, points[i].lon]);
+        cache[i * 2] = lp.x;
+        cache[i * 2 + 1] = lp.y;
+      }
+      projectedPointCache = cache;
+      projectedPointCacheZoom = zoom;
+    }
+    return projectedPointCache;
+  }
+
   // Proximity click handler - makes it easier to click on small points
   function handleProximityClick(e) {
     if (state.data.filtered.length === 0) return;
 
-    const clickPoint = e.containerPoint; // Pixel coordinates
     const threshold = 15; // pixels - click radius
+    const thresholdSq = threshold * threshold;
+    const clickPoint = e.layerPoint; // Pixel coordinates, same space as the cache
 
-    // Find nearest point within threshold, checking only the points that
-    // are actually drawn (same sampling as redrawMap)
-    const pointSampleRate = getPointSampleRate();
+    // Find the nearest point within the click threshold
+    const projected = getProjectedPoints();
     let nearestPoint = null;
-    let minDistance = Infinity;
+    let minDistanceSq = thresholdSq;
 
-    for (let i = 0; i < state.data.filtered.length; i += pointSampleRate) {
-      const point = state.data.filtered[i];
-      const layerPoint = state.map.latLngToContainerPoint([point.lat, point.lon]);
-      const distance = Math.sqrt(
-        Math.pow(clickPoint.x - layerPoint.x, 2) +
-        Math.pow(clickPoint.y - layerPoint.y, 2)
-      );
+    for (let i = 0; i < state.data.filtered.length; i++) {
+      const dx = clickPoint.x - projected[i * 2];
+      const dy = clickPoint.y - projected[i * 2 + 1];
+      const distanceSq = dx * dx + dy * dy;
 
-      if (distance < threshold && distance < minDistance) {
-        minDistance = distance;
-        nearestPoint = point;
+      if (distanceSq < minDistanceSq) {
+        minDistanceSq = distanceSq;
+        nearestPoint = state.data.filtered[i];
       }
     }
 
@@ -3178,10 +3482,7 @@
   function updateViewportStats() {
     if (state.data.filtered.length === 0) return;
 
-    // Count the sampled points (matching redrawMap's sampling) in viewport
-    const pointSampleRate = getPointSampleRate();
-    const sampledPoints = state.data.filtered.filter((_, i) => i % pointSampleRate === 0);
-    const visibleInViewport = countPointsInViewport(sampledPoints);
+    const visibleInViewport = countPointsInViewport();
     document.getElementById('statVisible').textContent = visibleInViewport.toLocaleString();
   }
 

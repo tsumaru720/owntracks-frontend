@@ -27,8 +27,7 @@
       "show": true,
       "color": "#3388ff",
       "width": 3,
-      "opacity": 0.7,
-      "smooth": false
+      "opacity": 0.7
     },
     "accuracy": {
       "maxMeters": 0
@@ -60,9 +59,6 @@
       }
     },
     "storageEnabled": true
-  },
-  "performance": {
-    "dynamicPointVisibility": true
   },
   "debug": {
     "consoleLogging": false
