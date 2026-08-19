@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>OwnTracks Frontend</title>
+  <!-- Suppress the automatic /favicon.ico request (no icon asset) -->
+  <link rel="icon" href="data:,">
 
   <!-- Leaflet CSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -18,10 +20,8 @@
           return settings.darkMode;
         }
       } catch (e) {
-        // Fallback to system preference
       }
 
-      // Check system preference
       if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
         return true;
       }
@@ -32,7 +32,6 @@
     const bgColor = isDarkMode ? '#1a1a1a' : '#f8f9fa';
     const textColor = isDarkMode ? '#e0e0e0' : '#212529';
 
-    // Set on html element immediately
     document.documentElement.style.backgroundColor = bgColor;
     document.documentElement.style.color = textColor;
     if (isDarkMode) {
@@ -89,7 +88,7 @@
 
         <!-- Quick Date Range Presets -->
         <div id="quickDateRanges">
-          <label style="font-size: 13px; margin-bottom: 5px; font-weight: 500;">Quick Ranges:</label>
+          <label>Quick Ranges:</label>
           <div class="quick-range-buttons">
             <button type="button" class="btn btn-sm quick-range" data-preset="today">Today</button>
             <button type="button" class="btn btn-sm quick-range" data-preset="2days">Last 2 Days</button>
@@ -120,7 +119,7 @@
           <input type="checkbox" id="autoFitToBounds" checked>
           <label for="autoFitToBounds">Auto-fit to Data</label>
         </div>
-        <small style="opacity: 0.7; display: block; margin-top: -8px; margin-bottom: 30px;">
+        <small class="setting-hint wide">
           Automatically zoom and pan map to show all loaded data points.
         </small>
 
@@ -226,7 +225,7 @@
           </div>
         </div>
 
-        <small style="opacity: 0.7; display: block; margin-top: -8px; margin-bottom: 15px;">
+        <small class="setting-hint snug">
           0 = show all points. Filters points with GPS accuracy greater than this value.
         </small>
       </div>
@@ -360,7 +359,7 @@
           <input type="checkbox" id="dynamicPointVisibility" checked>
           <label for="dynamicPointVisibility">Dynamic Point Visibility</label>
         </div>
-        <small style="opacity: 0.7; display: block; margin-top: -8px; margin-bottom: 20px;">
+        <small class="setting-hint">
           Automatically adjusts point density based on zoom level and total points. Lines remain visible even when points are sampled.
         </small>
 
@@ -368,7 +367,7 @@
           <input type="checkbox" id="consoleLoggingEnabled" checked>
           <label for="consoleLoggingEnabled">Console Logging</label>
         </div>
-        <small style="opacity: 0.7; display: block; margin-top: -8px; margin-bottom: 20px;">
+        <small class="setting-hint">
           Enable console.log output for debugging. Disable to reduce console noise.
         </small>
 
@@ -376,25 +375,25 @@
           <input type="checkbox" id="storageEnabled" checked>
           <label for="storageEnabled">Cache location data in browser</label>
         </div>
-        <small style="opacity: 0.7; display: block; margin-top: -8px; margin-bottom: 20px; line-height: 1.4;">
+        <small class="setting-hint multiline">
           Caches GPS location data locally to speed up loading and reduce API calls. Location data is cached per day, per device. Refreshing only fetches missing days.
         </small>
 
         <div class="form-group">
           <button class="btn btn-secondary btn-block" id="clearDeviceCacheBtn">Clear Device Cache</button>
-          <small style="opacity: 0.7; display: block; margin-top: 4px;">Clears cached location data for the currently selected user/device only</small>
+          <small class="button-hint">Clears cached location data for the currently selected user/device only</small>
         </div>
         <div class="form-group">
           <button class="btn btn-secondary btn-block" id="clearAllCacheBtn">Clear All Cache</button>
-          <small style="opacity: 0.7; display: block; margin-top: 4px;">Removes all cached location data (all users/devices), keeps your display settings and theme</small>
+          <small class="button-hint">Removes all cached location data (all users/devices), keeps your display settings and theme</small>
         </div>
         <div class="form-group">
           <button class="btn btn-secondary btn-block" id="clearSettingsBtn">Clear Settings</button>
-          <small style="opacity: 0.7; display: block; margin-top: 4px;">Resets all saved settings (display, theme, selections), keeps all cached data</small>
+          <small class="button-hint">Resets all saved settings (display, theme, selections), keeps all cached data</small>
         </div>
         <div class="form-group">
           <button class="btn btn-danger btn-block" id="clearAllDataBtn">Clear All Data</button>
-          <small style="opacity: 0.7; display: block; margin-top: 4px;">Removes everything: cached data, display settings, and theme</small>
+          <small class="button-hint">Removes everything: cached data, display settings, and theme</small>
         </div>
       </div>
     </div>
@@ -408,9 +407,8 @@
     </div>
   </aside>
 
-  <!-- Floating quick actions dock - vertically centered at the left screen
-       edge; sits after the sidebar in the DOM so CSS can slide it along
-       with the sidebar via a sibling selector -->
+  <!-- Floating quick actions dock - after the sidebar in the DOM so CSS
+       can slide it along via a sibling selector -->
   <div class="quick-actions" id="quickActions" role="toolbar" aria-label="Map quick actions">
     <button class="quick-action-btn" id="qaRecenter" title="Recenter Map" aria-label="Recenter Map" disabled>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -443,8 +441,7 @@
     </button>
   </div>
 
-  <!-- Floating help button - bottom-left corner, rides along with the
-       sidebar like the quick actions dock -->
+  <!-- Floating help button - rides along with the sidebar like the dock -->
   <button class="help-fab" id="helpFab" title="Keyboard Shortcuts (?)" aria-label="Show keyboard shortcuts" aria-haspopup="dialog" aria-expanded="false">?</button>
 
   <!-- Custom date picker popup -->

@@ -18,7 +18,6 @@
 }
 
 html {
-  background-color: #f8f9fa;
   transition: background-color 0.3s;
 }
 
@@ -33,17 +32,9 @@ body.light-mode {
   color: var(--text-light);
 }
 
-html.light-mode {
-  background-color: var(--bg-light);
-}
-
 body.dark-mode {
   background-color: var(--bg-dark);
   color: var(--text-dark);
-}
-
-html.dark-mode {
-  background-color: var(--bg-dark);
 }
 
 /* Theme Toggle in Sidebar */
@@ -166,8 +157,7 @@ html.dark-mode {
   padding: 4px 12px;
   line-height: 1;
   border-radius: 4px;
-  /* Pin the top edge (21px tall: 13px line + 8px padding) so the hover
-     expansion grows downward over the map instead of re-centering */
+  /* Pin the top edge so hover expansion grows downward, not re-centering */
   transform: translate(-50%, -10.5px);
 }
 
@@ -181,9 +171,9 @@ html.dark-mode {
   display: none;
 }
 
-/* Quick Actions Floating Dock - vertically centered at the left screen edge;
-   slides right to hug the sidebar when it opens (sibling selector, so the
-   bar must stay after the sidebar in the DOM) */
+/* Quick Actions Floating Dock - vertically centered at the left screen
+   edge; must stay after the sidebar in the DOM for the sibling selector
+   below to slide it along */
 .quick-actions {
   position: fixed;
   top: 50%;
@@ -248,10 +238,8 @@ html.dark-mode {
   opacity: 1;
 }
 
-/* Hover previews the toggle direction: inactive hints toward the accent
-   (about to turn on), active fades toward the bar (about to turn off).
-   Mutually exclusive via :not(.active), so styles swap the instant the
-   class flips on click - no waiting for the mouse to move off */
+/* Hover previews the toggle direction; :not(.active) keeps the two
+   states mutually exclusive so styles swap the instant the class flips */
 .quick-action-btn:hover:not(:disabled):not(.active) {
   background-color: rgba(51, 136, 255, 0.18);
   color: var(--accent);
@@ -267,9 +255,8 @@ html.dark-mode {
   cursor: not-allowed;
 }
 
-/* Floating help button - bottom-left, same glassy pill styling as the quick
-   actions dock and slides along with the sidebar the same way (must also stay
-   after the sidebar in the DOM for the sibling selectors to match) */
+/* Floating help button - bottom-left; slides along with the sidebar like
+   the dock (same after-sidebar DOM requirement) */
 .help-fab {
   position: fixed;
   bottom: 10px;
@@ -433,8 +420,7 @@ body:not(.ui-ready) .sub-section-content {
   transition: max-height 0.3s ease, opacity 0.3s ease;
 }
 
-.section-toggle.collapsed + .section-content,
-.sidebar-section > .section-toggle.collapsed + .section-content {
+.section-toggle.collapsed + .section-content {
   max-height: 0 !important;
   min-height: 0 !important;
   padding-top: 0 !important;
@@ -454,9 +440,8 @@ body:not(.ui-ready) .sub-section-content {
   transition: opacity 0.2s, padding 0.3s ease;
 }
 
-/* Animate padding along with max-height so contents don't jump up when the
-   padding is removed - only on the collapsed state, so the expand path still
-   snaps padding back instantly while measuring height with transitions off */
+/* Animate padding with the collapse so contents don't jump; collapsed-only
+   so the expand path still snaps padding back instantly for measuring */
 .sidebar.transitions-enabled .section-toggle.collapsed + .section-content {
   transition: max-height 0.3s ease, opacity 0.3s ease, visibility 0s linear 0.3s, padding-top 0.3s ease, padding-bottom 0.3s ease;
 }
@@ -466,15 +451,12 @@ body:not(.ui-ready) .sub-section-content {
   padding-bottom: 15px;
 }
 
-/* Data source section needs more space for buttons */
 .sidebar-section[data-section="datasource"] > .section-content {
   padding-bottom: 15px;
   min-height: fit-content;
 }
 
-/* Visual grouping of point/line/heatmap settings in Display Options -
-   extra bottom margin separates the clusters; form-groups inside each
-   cluster keep their normal 15px spacing */
+/* Visual grouping of point/line/heatmap settings in Display Options */
 .display-option-group {
   margin-bottom: 30px;
 }
@@ -483,25 +465,18 @@ body:not(.ui-ready) .sub-section-content {
   margin-bottom: 0;
 }
 
-/* Sub-collapsible sections */
+/* Sub-collapsible sections; only ever appear inside a toggle-config-group */
 .toggle-config-group {
   margin-bottom: 10px;
 }
 
-.toggle-config-group > .sub-section {
+.sub-section {
   margin-left: 8px;
   padding-left: 8px;
   border-left: 1px solid var(--border-light, #dee2e6);
 }
 
-.sub-section {
-  margin-left: 0;
-  padding-left: 8px;
-  border-left: 1px solid var(--border-light, #dee2e6);
-}
-
-.dark-mode .sub-section,
-.dark-mode .toggle-config-group > .sub-section {
+.dark-mode .sub-section {
   border-left-color: var(--border-dark, #333);
 }
 
@@ -526,8 +501,7 @@ body:not(.ui-ready) .sub-section-content {
   padding: 4px 0;
 }
 
-/* Keep the sub-header's margin/padding change in step with the collapse
-   animation (gated on transitions-enabled to skip page-load restore) */
+/* Keep margin/padding in step with the collapse animation */
 .sidebar.transitions-enabled .sub-section-header.collapsed {
   transition: opacity 0.2s, margin 0.3s ease, padding 0.3s ease;
 }
@@ -586,6 +560,33 @@ body:not(.ui-ready) .sub-section-content {
   margin-bottom: 15px;
 }
 
+/* Hint text shown under a setting (variants adjust the gap that follows) */
+.setting-hint {
+  opacity: 0.7;
+  display: block;
+  margin-top: -8px;
+  margin-bottom: 20px;
+}
+
+.setting-hint.wide {
+  margin-bottom: 30px;
+}
+
+.setting-hint.snug {
+  margin-bottom: 15px;
+}
+
+.setting-hint.multiline {
+  line-height: 1.4;
+}
+
+/* Hint text under an action button */
+.button-hint {
+  opacity: 0.7;
+  display: block;
+  margin-top: 4px;
+}
+
 .form-group label {
   display: block;
   font-size: 13px;
@@ -594,10 +595,7 @@ body:not(.ui-ready) .sub-section-content {
 }
 
 .form-group input[type="text"],
-.form-group input[type="password"],
 .form-group input[type="number"],
-.form-group input[type="date"],
-.form-group input[type="datetime-local"],
 .form-group select {
   width: 100%;
   padding: 8px 10px;
@@ -608,27 +606,6 @@ body:not(.ui-ready) .sub-section-content {
   background-color: inherit;
   color: inherit;
   cursor: pointer;
-}
-
-/* Improve datetime-local input appearance */
-.form-group input[type="datetime-local"]::-webkit-calendar-picker-indicator {
-  filter: invert(0.5);
-  cursor: pointer;
-  opacity: 0.6;
-}
-
-.dark-mode .form-group input[type="datetime-local"]::-webkit-calendar-picker-indicator {
-  filter: invert(1);
-  opacity: 0.5;
-}
-
-.form-group input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover {
-  opacity: 1;
-}
-
-/* Floating date picker container - positions to the right of sidebar over the map */
-#customDateRow {
-  position: relative;
 }
 
 /* Date input confirmation flash */
@@ -650,27 +627,17 @@ body:not(.ui-ready) .sub-section-content {
   100% { border-color: var(--border-dark); box-shadow: none; }
 }
 
-/* Custom date picker popup */
+/* Custom date picker popup - anchored by JS to the right of the input that
+   opened it; the transform keeps it vertically centred on that anchor.
+   Sits above the map, dock, sidebar and header */
 .custom-date-picker {
   position: fixed;
-  left: calc(var(--sidebar-width) + 10px);
-  top: 50%;
   transform: translateY(-50%);
   width: 280px;
   z-index: 2000;
   border-radius: 8px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
   padding: 12px;
-  pointer-events: auto;
-}
-
-/* When sidebar is closed, move picker to left edge */
-.sidebar:not(.open) ~ * .custom-date-picker {
-  left: 10px;
-}
-
-/* Ensure picker is above map but below header */
-#customDatePicker {
   pointer-events: auto;
 }
 
@@ -682,11 +649,6 @@ body:not(.ui-ready) .sub-section-content {
 .dark-mode .custom-date-picker {
   background: #2a2a2a;
   border: 1px solid var(--border-dark);
-}
-
-/* Position picker to the right when sidebar is open */
-.sidebar.open ~ * .custom-date-picker {
-  left: calc(var(--sidebar-width) + 10px);
 }
 
 .date-picker-header {
@@ -781,13 +743,6 @@ body:not(.ui-ready) .sub-section-content {
 
 .date-picker-day.today {
   font-weight: 600;
-}
-
-.light-mode .date-picker-day.today {
-  color: var(--accent);
-}
-
-.dark-mode .date-picker-day.today {
   color: var(--accent);
 }
 
@@ -855,15 +810,6 @@ body:not(.ui-ready) .sub-section-content {
   border-color: var(--accent);
 }
 
-.form-row {
-  display: flex;
-  gap: 10px;
-}
-
-.form-row .form-group {
-  flex: 1;
-}
-
 /* Checkbox */
 .checkbox-group {
   display: flex;
@@ -912,13 +858,6 @@ body:not(.ui-ready) .sub-section-content {
   border-radius: 50%;
   background: var(--accent);
   cursor: pointer;
-}
-
-.slider-value {
-  min-width: 50px;
-  text-align: right;
-  font-size: 13px;
-  font-family: monospace;
 }
 
 /* Color Picker */
@@ -999,20 +938,10 @@ body:not(.ui-ready) .sub-section-content {
   flex: 1;
 }
 
-.btn-group:first-of-type {
-  margin-top: 12px;
-}
-
+/* Size modifier - always paired with .btn, which provides the base look */
 .btn-sm {
   padding: 6px 10px;
   font-size: 12px;
-  font-weight: 500;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: background-color 0.2s, opacity 0.2s;
-  background-color: #6c757d;
-  color: #fff;
 }
 
 .btn-sm:hover {
@@ -1024,6 +953,11 @@ body:not(.ui-ready) .sub-section-content {
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 8px;
+}
+
+#quickDateRanges label {
+  font-size: 13px;
+  font-weight: 500;
 }
 
 /* Cache status (statistics section) */
@@ -1305,22 +1239,6 @@ body:not(.ui-ready) .sub-section-content {
   will-change: transform;
 }
 
-/* Expand hitbox for point markers - makes small points easier to click */
-.leaflet-overlay-layer circle.leaflet-vector-icon {
-  stroke-width: 20px;
-  stroke: transparent;
-  stroke-opacity: 0;
-  pointer-events: all;
-}
-
-/* Also try targeting the SVG path elements directly */
-.leaflet-overlay-layer path.leaflet-vector-icon {
-  stroke-width: 20px;
-  stroke: transparent;
-  stroke-opacity: 0;
-  pointer-events: all;
-}
-
 .light-mode #map {
   background-color: #e5e5e5;
 }
@@ -1362,40 +1280,6 @@ body:not(.ui-ready) .sub-section-content {
   font-weight: 600;
 }
 
-/* Point Tooltips */
-.point-tooltip {
-  background: rgba(0, 0, 0, 0.8);
-  color: #fff;
-  border: none;
-  border-radius: 4px;
-  padding: 4px 8px;
-  font-size: 12px;
-  white-space: nowrap;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
-}
-
-.point-tooltip:before {
-  border-top-color: rgba(0, 0, 0, 0.8);
-}
-
-.point-tooltip .leaflet-tooltip-tip {
-  background: rgba(0, 0, 0, 0.8);
-}
-
-.light-mode .point-tooltip {
-  background: rgba(255, 255, 255, 0.95);
-  color: #212529;
-  border: 1px solid #dee2e6;
-}
-
-.light-mode .point-tooltip:before {
-  border-top-color: rgba(255, 255, 255, 0.95);
-}
-
-.light-mode .point-tooltip .leaflet-tooltip-tip {
-  background: rgba(255, 255, 255, 0.95);
-}
-
 /* Dark Mode Map Filter */
 .dark-mode .leaflet-layer,
 .dark-mode .leaflet-control-zoom-in,
@@ -1410,28 +1294,14 @@ body:not(.ui-ready) .sub-section-content {
   filter: invert(0.9) hue-rotate(170deg) brightness(1.5) contrast(1.2) saturate(0.3) !important;
 }
 
-/* Fix for tile gaps - set background color on tile pane */
-.leaflet-tile-pane {
-  background-color: transparent;
-}
-
-.light-mode .leaflet-tile-container {
-  background-color: #e5e5e5;
-}
-
-.dark-mode .leaflet-tile-container {
-  background-color: #1a1a1a;
-}
-
 /* Responsive */
 @media (max-width: 600px) {
   :root {
     --sidebar-width: 100%;
   }
 
-  /* Sidebar covers the whole screen when open here - keep the dock parked
-     at the screen edge (hidden behind the sidebar) instead of sliding
-     off-screen to calc(100% + 10px) */
+  /* Sidebar covers the screen when open here - keep the dock parked at
+     the edge rather than sliding off-screen */
   .sidebar.open ~ .quick-actions {
     left: 10px;
   }

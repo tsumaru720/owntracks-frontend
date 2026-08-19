@@ -9,8 +9,6 @@
   },
   "map": {
     "tileServer": "https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
-    "defaultCenter": [51.50138, -0.14189],
-    "defaultZoom": 13,
     "minZoom": 2,
     "maxZoom": 21
   },

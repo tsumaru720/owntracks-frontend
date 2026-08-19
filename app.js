@@ -23,27 +23,21 @@
       raw: [],           // All points from API
       filtered: [],      // Points after accuracy filter
       users: [],
-      devices: [],
       devicesByUser: {}, // Session cache of device lists per user
       maxAccuracy: 0,
       timeRange: { start: null, end: null },
       sourceBreakdown: { cached: 0, fresh: 0 }
     },
     settings: {},
-    isLoading: false,
     sidebarOpen: false,
     loadingStartTime: null,
-    loadingTimerInterval: null
+    loadingTimerInterval: null,
+    suppressMapSave: false
   };
 
   // ============================================================================
   // Console Logging Helper
   // ============================================================================
-
-  function shouldLog() {
-    // Always allow errors and warnings through
-    return true;
-  }
 
   function log(...args) {
     if (getSetting('consoleLoggingEnabled', false)) {
@@ -52,12 +46,10 @@
   }
 
   function logWarn(...args) {
-    // Warnings always show
     console.warn(...args);
   }
 
   function logError(...args) {
-    // Errors always show
     console.error(...args);
   }
 
@@ -76,7 +68,6 @@
   async function loadEnvironmentConfig() {
     let hasConfig = false;
 
-    // Deep merge function for nested objects
     function deepMerge(target, source) {
       for (const key in source) {
         if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
@@ -95,7 +86,6 @@
       if (response.ok) {
         const envConfig = await response.json();
 
-        // Use environment.json as the base config
         window.CONFIG = envConfig;
         hasConfig = true;
         log('Loaded configuration from environment.json');
@@ -111,8 +101,6 @@
       if (response.ok) {
         const fileConfig = await response.json();
 
-        // Deep merge: config.json overwrites environment.json values
-        // Start with existing CONFIG (from env) or empty object
         const baseConfig = window.CONFIG || {};
         window.CONFIG = deepMerge(baseConfig, fileConfig);
         hasConfig = true;
@@ -227,8 +215,7 @@
 
   function saveSetting(key, value, defaultValue) {
     // Only save if value differs from default
-    const currentDefault = defaultValue !== undefined ? defaultValue : getDefaultSetting(key);
-    if (value === currentDefault) {
+    if (value === defaultValue) {
       // Remove from settings if it's the default (clean up storage)
       delete state.settings[key];
     } else {
@@ -237,36 +224,44 @@
     localStorage.setItem('owntracks_settings', JSON.stringify(state.settings));
   }
 
-  function getDefaultSetting(key) {
-    const defaults = {
-      pointSize: 2,
-      pointColor: '#3388ff',
-      pointOpacity: 0.5,
-      lineWidth: 3,
-      lineColor: '#3388ff',
-      lineOpacity: 0.7,
-      accuracyMaxMeters: 0,
-      altitudeMin: 0,
-      altitudeMax: 1000,
-      altitudePointsLowColor: '#00ff00',
-      altitudePointsHighColor: '#ff0000',
-      altitudeLinesLowColor: '#00ff00',
-      altitudeLinesHighColor: '#ff0000',
-      heatmapRadius: 25,
-      heatmapBlur: 15,
-      heatmapMinOpacity: 0.05,
-      heatmapLowColor: '#0000ff',
-      heatmapMidColor: '#00ffff',
-      heatmapHighColor: '#ff0000',
-      darkMode: false,
-      storageEnabled: true,    // Enabled by default
-      sidebarOpen: true,       // Visible by default
-      autoFitToBounds: true,   // Auto-fit map to data by default
-      dynamicPointVisibility: true,  // Enabled by default
-      consoleLoggingEnabled: false  // Console logging disabled by default
-    };
-    return defaults[key];
-  }
+  // Setting key -> nested config file path, checked when no user value is
+  // saved. Module-level so it isn't rebuilt on every getSetting call.
+  const CONFIG_PATHS = {
+    // Points
+    'showPoints': 'display.points.show',
+    'pointColor': 'display.points.color',
+    'pointSize': 'display.points.size',
+    'pointOpacity': 'display.points.opacity',
+    // Lines
+    'showLines': 'display.lines.show',
+    'lineColor': 'display.lines.color',
+    'lineWidth': 'display.lines.width',
+    'lineOpacity': 'display.lines.opacity',
+    'smoothLines': 'display.lines.smooth',
+    // Accuracy
+    'accuracyMaxMeters': 'display.accuracy.maxMeters',
+    // Altitude Points
+    'altitudeEnabled': 'display.altitude.points.enabled',
+    'altitudeMin': 'display.altitude.min',
+    'altitudeMax': 'display.altitude.max',
+    'altitudePointsLowColor': 'display.altitude.points.lowColor',
+    'altitudePointsHighColor': 'display.altitude.points.highColor',
+    // Altitude Lines
+    'altitudeLinesEnabled': 'display.altitude.lines.enabled',
+    'altitudeLinesLowColor': 'display.altitude.lines.lowColor',
+    'altitudeLinesHighColor': 'display.altitude.lines.highColor',
+    // Heatmap
+    'heatmapEnabled': 'display.heatmap.enabled',
+    'heatmapRadius': 'display.heatmap.radius',
+    'heatmapBlur': 'display.heatmap.blur',
+    'heatmapMinOpacity': 'display.heatmap.minOpacity',
+    'heatmapLowColor': 'display.heatmap.gradient.lowColor',
+    'heatmapMidColor': 'display.heatmap.gradient.midColor',
+    'heatmapHighColor': 'display.heatmap.gradient.highColor',
+    'heatmapMaxZoom': 'display.heatmap.maxZoom',
+    // Storage
+    'storageEnabled': 'display.storageEnabled'
+  };
 
   function getSetting(key, defaultValue) {
     // Check localStorage first, then config file, then default
@@ -274,61 +269,18 @@
       return state.settings[key];
     }
 
-    // Check config file for nested settings
-    if (window.CONFIG.display) {
-      // Map flat keys to nested config paths
-      const configPaths = {
-        // Points
-        'showPoints': 'display.points.show',
-        'pointColor': 'display.points.color',
-        'pointSize': 'display.points.size',
-        'pointOpacity': 'display.points.opacity',
-        // Lines
-        'showLines': 'display.lines.show',
-        'lineColor': 'display.lines.color',
-        'lineWidth': 'display.lines.width',
-        'lineOpacity': 'display.lines.opacity',
-        'smoothLines': 'display.lines.smooth',
-        // Accuracy
-        'accuracyMaxMeters': 'display.accuracy.maxMeters',
-        // Altitude Points
-        'altitudeEnabled': 'display.altitude.points.enabled',
-        'altitudeMin': 'display.altitude.min',
-        'altitudeMax': 'display.altitude.max',
-        'altitudePointsLowColor': 'display.altitude.points.lowColor',
-        'altitudePointsHighColor': 'display.altitude.points.highColor',
-        // Altitude Lines
-        'altitudeLinesEnabled': 'display.altitude.lines.enabled',
-        'altitudeLinesLowColor': 'display.altitude.lines.lowColor',
-        'altitudeLinesHighColor': 'display.altitude.lines.highColor',
-        // Heatmap
-        'heatmapEnabled': 'display.heatmap.enabled',
-        'heatmapRadius': 'display.heatmap.radius',
-        'heatmapBlur': 'display.heatmap.blur',
-        'heatmapMinOpacity': 'display.heatmap.minOpacity',
-        'heatmapLowColor': 'display.heatmap.gradient.lowColor',
-        'heatmapMidColor': 'display.heatmap.gradient.midColor',
-        'heatmapHighColor': 'display.heatmap.gradient.highColor',
-        'heatmapMaxZoom': 'display.heatmap.maxZoom',
-        // Storage
-        'storageEnabled': 'display.storageEnabled'
-      };
-
-      const path = configPaths[key];
-      if (path) {
-        const value = getNestedConfigValue(path);
-        if (value !== undefined) {
-          return value;
-        }
+    const path = CONFIG_PATHS[key];
+    if (path) {
+      const value = getNestedConfigValue(path);
+      if (value !== undefined) {
+        return value;
       }
     }
 
-    // Check config file for performance settings
     if (key === 'dynamicPointVisibility' && window.CONFIG.performance?.dynamicPointVisibility !== undefined) {
       return window.CONFIG.performance.dynamicPointVisibility;
     }
 
-    // Check config file for debug settings
     if (key === 'consoleLoggingEnabled' && window.CONFIG.debug?.consoleLogging !== undefined) {
       return window.CONFIG.debug.consoleLogging;
     }
@@ -356,37 +308,15 @@
   // Default map settings (used if not in config)
   const DEFAULT_MAP_SETTINGS = {
     tileServer: "https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
-    defaultCenter: [51.50138, -0.14189], // London (Westminster)
-    defaultZoom: 13,
     minZoom: 2,
     maxZoom: 21
-  };
-
-  // Default heatmap settings (used if not in config)
-  const DEFAULT_HEATMAP_SETTINGS = {
-    gradient: {
-      0.0: 'blue',
-      0.2: 'cyan',
-      0.4: 'lime',
-      0.6: 'yellow',
-      1.0: 'red'
-    },
-    minOpacity: 0.05,
-    maxZoom: 18,
-    radius: 25,
-    blur: 15
   };
 
   function getMapSetting(key) {
     return window.CONFIG.map?.[key] ?? DEFAULT_MAP_SETTINGS[key];
   }
 
-  function getHeatmapSetting(key) {
-    return window.CONFIG.heatmap?.[key] ?? DEFAULT_HEATMAP_SETTINGS[key];
-  }
-
   function initMap() {
-    // Start with world view
     state.map = L.map('map', {
       zoomControl: false,
       attributionControl: false,
@@ -394,21 +324,17 @@
       wheelPxPerZoomLevel: 60 // Slower scroll zoom
     }).setView([0, 0], 2);
 
-    // Add zoom control to top-right
     L.control.zoom({
       position: 'topright'
     }).addTo(state.map);
 
-    // Add attribution to bottom-right
     L.control.attribution({
       position: 'bottomright',
       prefix: ''
     }).addTo(state.map);
 
-    // Add tile layer
     updateTileLayer();
 
-    // Handle zoom events for dynamic rendering
     // Debounced redraw to avoid performance issues during continuous zooming
     let zoomRedrawTimeout = null;
     const handleZoomChange = () => {
@@ -421,7 +347,6 @@
     };
     state.map.on('zoomend', handleZoomChange);
 
-    // Initialize layer groups with proper z-index ordering
     // Order: Heatmap (bottom), Lines (middle), Points (top)
     state.layers.points = L.layerGroup([], { zIndex: 400 }).addTo(state.map);
     state.layers.lines = L.layerGroup([], { zIndex: 300 }).addTo(state.map);
@@ -434,14 +359,12 @@
   }
 
   function updateTileLayer() {
-    // Remove existing tile layer if any
     state.map.eachLayer(layer => {
       if (layer instanceof L.TileLayer) {
         state.map.removeLayer(layer);
       }
     });
 
-    // Add new tile layer - simplified for debugging
     const tileUrl = getMapSetting('tileServer');
     log('Adding tile layer with URL:', tileUrl);
 
@@ -467,7 +390,6 @@
       // Trigger reflow to restart the animation
       void input.offsetWidth;
       input.classList.add('date-confirmed');
-      // Remove the class after animation completes
       setTimeout(() => input.classList.remove('date-confirmed'), 600);
     };
 
@@ -483,13 +405,24 @@
     let pickerCurrentDate = new Date();
     let pickerViewMode = 'days'; // 'days', 'months', or 'years'
 
-    // Open date picker when input is clicked
+    // Anchor the picker right of the spawning input, vertically centred on
+    // it (via the CSS transform), clamped to stay on screen
+    const positionDatePicker = () => {
+      if (!currentPickerInput) return;
+      const inputRect = currentPickerInput.getBoundingClientRect();
+      const left = Math.min(
+        inputRect.right + 10,
+        window.innerWidth - customDatePicker.offsetWidth - 10
+      );
+      customDatePicker.style.left = Math.max(10, left) + 'px';
+      customDatePicker.style.top = (inputRect.top + inputRect.height / 2) + 'px';
+    };
+
     document.querySelectorAll('.date-input-wrapper input').forEach(input => {
       input.addEventListener('click', (e) => {
         currentPickerInput = e.target;
         const currentValue = e.target.dataset.value || '';
 
-        // Parse current value or use now
         if (currentValue) {
           // Handle both 'T' and ' ' separators
           const separator = currentValue.includes('T') ? 'T' : ' ';
@@ -502,7 +435,6 @@
           const hour = timeParts[0];
           const minute = timeParts[1];
 
-          // Validate we have valid numbers
           if (!isNaN(year) && !isNaN(month) && !isNaN(day)) {
             pickerCurrentDate = new Date(year, month - 1, day, hour || 0, minute || 0);
           } else {
@@ -517,11 +449,9 @@
         // Reset to days view when opening
         pickerViewMode = 'days';
 
-        // Position and show picker - position it below the clicked input
-        const inputRect = e.target.getBoundingClientRect();
-        customDatePicker.style.left = inputRect.left + 'px';
-        customDatePicker.style.top = (inputRect.bottom + 5) + 'px';
+        // Show first so the popup's width can be measured, then anchor it
         customDatePicker.style.display = 'block';
+        positionDatePicker();
 
         renderDatePicker(pickerCurrentDate);
       });
@@ -554,7 +484,6 @@
         currentPickerInput.value = dateStr;
         currentPickerInput.dataset.value = dateStr;
 
-        // Save the date
         if (currentPickerInput.id === 'fromDate') {
           saveSetting('fromDate', dateStr, '');
         } else {
@@ -612,7 +541,6 @@
       let hour = parseInt(hourInput.value) || 0;
       let minute = parseInt(minuteInput.value) || 0;
 
-      // Clamp values
       hour = Math.max(0, Math.min(23, hour));
       minute = Math.max(0, Math.min(59, minute));
 
@@ -627,7 +555,6 @@
       const year = date.getFullYear();
       const month = date.getMonth();
 
-      // Update header - add click hint in year/month mode
       const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
                           'July', 'August', 'September', 'October', 'November', 'December'];
       const monthYearEl = document.querySelector('.date-picker-month-year');
@@ -640,7 +567,6 @@
         monthYearEl.textContent = 'Select Year';
       }
 
-      // Add click handler for month/year header to switch views
       monthYearEl.onclick = (e) => {
         e.stopPropagation();
         e.preventDefault();
@@ -654,7 +580,6 @@
         renderDatePicker(pickerCurrentDate);
       };
 
-      // Update time inputs
       document.getElementById('pickerHour').value = String(date.getHours()).padStart(2, '0');
       document.getElementById('pickerMinute').value = String(date.getMinutes()).padStart(2, '0');
 
@@ -662,13 +587,11 @@
       const daysGrid = document.querySelector('.date-picker-days');
 
       if (pickerViewMode === 'days') {
-        // Show days header
         daysHeader.style.display = 'grid';
         // Reset grid to 7 columns for days view
         daysGrid.style.display = 'grid';
         daysGrid.style.gridTemplateColumns = '';
 
-        // Generate calendar days
         const firstDay = new Date(year, month, 1);
         const lastDay = new Date(year, month + 1, 0);
         const startDay = firstDay.getDay();
@@ -683,12 +606,10 @@
 
         let html = '';
 
-        // Empty cells before first day
         for (let i = 0; i < startDay; i++) {
           html += '<div class="date-picker-day empty"></div>';
         }
 
-        // Days of month
         for (let day = 1; day <= totalDays; day++) {
           const isToday = day === today.getDate() &&
                           month === today.getMonth() &&
@@ -712,7 +633,6 @@
 
         daysGrid.innerHTML = html;
 
-        // Add click handlers to days
         document.querySelectorAll('.date-picker-day:not(.empty)').forEach(dayEl => {
           dayEl.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -724,13 +644,11 @@
               0
             );
 
-            // Update selection display
             document.querySelectorAll('.date-picker-day').forEach(d => d.classList.remove('selected'));
             dayEl.classList.add('selected');
           });
         });
       } else if (pickerViewMode === 'months') {
-        // Hide days header
         daysHeader.style.display = 'none';
 
         const today = new Date();
@@ -758,7 +676,6 @@
         daysGrid.style.display = 'grid';
         daysGrid.style.gridTemplateColumns = 'repeat(3, 1fr)';
 
-        // Add click handlers to months
         document.querySelectorAll('.date-picker-day[data-month]').forEach(monthEl => {
           monthEl.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -769,7 +686,6 @@
           });
         });
       } else if (pickerViewMode === 'years') {
-        // Hide days header
         daysHeader.style.display = 'none';
 
         const today = new Date();
@@ -795,7 +711,6 @@
         daysGrid.style.display = 'grid';
         daysGrid.style.gridTemplateColumns = 'repeat(3, 1fr)';
 
-        // Add click handlers to years
         document.querySelectorAll('.date-picker-day[data-year]').forEach(yearEl => {
           yearEl.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -808,12 +723,10 @@
       }
     }
 
-    // Reposition picker when sidebar is toggled
+    // Reposition picker when the sidebar is toggled (its inputs move)
     const observer = new MutationObserver(() => {
       if (customDatePicker.style.display !== 'none' && currentPickerInput) {
-        const inputRect = currentPickerInput.getBoundingClientRect();
-        customDatePicker.style.left = inputRect.left + 'px';
-        customDatePicker.style.top = (inputRect.bottom + 5) + 'px';
+        positionDatePicker();
       }
     });
 
@@ -856,7 +769,6 @@
     // Auto-fit to bounds
     document.getElementById('autoFitToBounds').addEventListener('change', (e) => {
       saveSetting('autoFitToBounds', e.target.checked, true);
-      // If enabled and data exists, fit immediately
       if (e.target.checked && state.data.filtered.length > 0) {
         fitMapToBounds();
       } else if (!e.target.checked) {
@@ -865,48 +777,45 @@
       }
     });
 
-    // Display options
-    document.getElementById('pointColor').addEventListener('change', (e) => {
-      document.getElementById('pointColorPicker').value = e.target.value;
-      saveSetting('pointColor', e.target.value, '#3388ff');
-      redrawMap();
-    });
-    document.getElementById('pointColorPicker').addEventListener('input', (e) => {
-      document.getElementById('pointColor').value = e.target.value;
-      saveSetting('pointColor', e.target.value, '#3388ff');
-      redrawMap();
-    });
-    document.getElementById('pointSize').addEventListener('change', (e) => {
-      saveSetting('pointSize', parseInt(e.target.value), 2);
-      redrawMap();
-    });
-    document.getElementById('pointOpacity').addEventListener('change', (e) => {
-      saveSetting('pointOpacity', parseFloat(e.target.value), 0.5);
-      redrawMap();
-    });
+    // Setting-input wiring helpers. Colour pickers share the text input's
+    // id + "Picker"; setting keys match element ids
+    const bindSettingInput = (id, defaultValue, parse = parseFloat) => {
+      document.getElementById(id).addEventListener('change', (e) => {
+        saveSetting(id, parse(e.target.value), defaultValue);
+        redrawMap();
+      });
+    };
 
-    document.getElementById('lineColor').addEventListener('change', (e) => {
-      document.getElementById('lineColorPicker').value = e.target.value;
-      saveSetting('lineColor', e.target.value, '#3388ff');
-      redrawMap();
-    });
-    document.getElementById('lineColorPicker').addEventListener('input', (e) => {
-      document.getElementById('lineColor').value = e.target.value;
-      saveSetting('lineColor', e.target.value, '#3388ff');
-      redrawMap();
-    });
-    document.getElementById('lineWidth').addEventListener('change', (e) => {
-      saveSetting('lineWidth', parseInt(e.target.value), 3);
-      redrawMap();
-    });
-    document.getElementById('lineOpacity').addEventListener('change', (e) => {
-      saveSetting('lineOpacity', parseFloat(e.target.value), 0.7);
-      redrawMap();
-    });
-    document.getElementById('smoothLines').addEventListener('change', (e) => {
-      saveSetting('smoothLines', e.target.checked, false);
-      redrawMap();
-    });
+    const bindSettingCheckbox = (id, defaultValue, onChange = redrawMap) => {
+      document.getElementById(id).addEventListener('change', (e) => {
+        saveSetting(id, e.target.checked, defaultValue);
+        onChange();
+      });
+    };
+
+    const bindSettingColor = (id, defaultValue) => {
+      const text = document.getElementById(id);
+      const picker = document.getElementById(id + 'Picker');
+      text.addEventListener('change', (e) => {
+        picker.value = e.target.value;
+        saveSetting(id, e.target.value, defaultValue);
+        redrawMap();
+      });
+      picker.addEventListener('input', (e) => {
+        text.value = e.target.value;
+        saveSetting(id, e.target.value, defaultValue);
+        redrawMap();
+      });
+    };
+
+    // Display options
+    bindSettingColor('pointColor', '#3388ff');
+    bindSettingInput('pointSize', 2, parseInt);
+    bindSettingInput('pointOpacity', 0.5);
+    bindSettingColor('lineColor', '#3388ff');
+    bindSettingInput('lineWidth', 3, parseInt);
+    bindSettingInput('lineOpacity', 0.7);
+    bindSettingCheckbox('smoothLines', false);
 
     // Accuracy filter
     document.getElementById('accuracySlider').addEventListener('input', (e) => {
@@ -918,138 +827,31 @@
     });
 
     // Altitude gradient
-    document.getElementById('altitudeEnabled').addEventListener('change', (e) => {
-      saveSetting('altitudeEnabled', e.target.checked, false);
-      redrawMap();
-    });
-    document.getElementById('altitudeMin').addEventListener('change', (e) => {
-      saveSetting('altitudeMin', parseInt(e.target.value), 0);
-      redrawMap();
-    });
-    document.getElementById('altitudeMax').addEventListener('change', (e) => {
-      saveSetting('altitudeMax', parseInt(e.target.value), 1000);
-      redrawMap();
-    });
-
-    // Altitude colors for points
-    document.getElementById('altitudePointsLowColor').addEventListener('change', (e) => {
-      document.getElementById('altitudePointsLowColorPicker').value = e.target.value;
-      saveSetting('altitudePointsLowColor', e.target.value, '#00ff00');
-      redrawMap();
-    });
-    document.getElementById('altitudePointsLowColorPicker').addEventListener('input', (e) => {
-      document.getElementById('altitudePointsLowColor').value = e.target.value;
-      saveSetting('altitudePointsLowColor', e.target.value, '#00ff00');
-      redrawMap();
-    });
-    document.getElementById('altitudePointsHighColor').addEventListener('change', (e) => {
-      document.getElementById('altitudePointsHighColorPicker').value = e.target.value;
-      saveSetting('altitudePointsHighColor', e.target.value, '#ff0000');
-      redrawMap();
-    });
-    document.getElementById('altitudePointsHighColorPicker').addEventListener('input', (e) => {
-      document.getElementById('altitudePointsHighColor').value = e.target.value;
-      saveSetting('altitudePointsHighColor', e.target.value, '#ff0000');
-      redrawMap();
-    });
-
-    // Altitude colors for lines
-    document.getElementById('altitudeLinesEnabled').addEventListener('change', (e) => {
-      saveSetting('altitudeLinesEnabled', e.target.checked, false);
-      redrawMap();
-    });
-    document.getElementById('altitudeLinesLowColor').addEventListener('change', (e) => {
-      document.getElementById('altitudeLinesLowColorPicker').value = e.target.value;
-      saveSetting('altitudeLinesLowColor', e.target.value, '#00ff00');
-      redrawMap();
-    });
-    document.getElementById('altitudeLinesLowColorPicker').addEventListener('input', (e) => {
-      document.getElementById('altitudeLinesLowColor').value = e.target.value;
-      saveSetting('altitudeLinesLowColor', e.target.value, '#00ff00');
-      redrawMap();
-    });
-    document.getElementById('altitudeLinesHighColor').addEventListener('change', (e) => {
-      document.getElementById('altitudeLinesHighColorPicker').value = e.target.value;
-      saveSetting('altitudeLinesHighColor', e.target.value, '#ff0000');
-      redrawMap();
-    });
-    document.getElementById('altitudeLinesHighColorPicker').addEventListener('input', (e) => {
-      document.getElementById('altitudeLinesHighColor').value = e.target.value;
-      saveSetting('altitudeLinesHighColor', e.target.value, '#ff0000');
-      redrawMap();
-    });
+    bindSettingCheckbox('altitudeEnabled', false);
+    bindSettingInput('altitudeMin', 0, parseInt);
+    bindSettingInput('altitudeMax', 1000, parseInt);
+    bindSettingColor('altitudePointsLowColor', '#00ff00');
+    bindSettingColor('altitudePointsHighColor', '#ff0000');
+    bindSettingCheckbox('altitudeLinesEnabled', false);
+    bindSettingColor('altitudeLinesLowColor', '#00ff00');
+    bindSettingColor('altitudeLinesHighColor', '#ff0000');
 
     // Heatmap
-    document.getElementById('heatmapRadius').addEventListener('change', (e) => {
-      saveSetting('heatmapRadius', parseInt(e.target.value), 25);
-      redrawMap();
-    });
-    document.getElementById('heatmapBlur').addEventListener('change', (e) => {
-      saveSetting('heatmapBlur', parseInt(e.target.value), 15);
-      redrawMap();
-    });
-    document.getElementById('heatmapMinOpacity').addEventListener('change', (e) => {
-      saveSetting('heatmapMinOpacity', parseFloat(e.target.value), 0.05);
-      redrawMap();
-    });
+    bindSettingInput('heatmapRadius', 25, parseInt);
+    bindSettingInput('heatmapBlur', 15, parseInt);
+    bindSettingInput('heatmapMinOpacity', 0.05);
+    bindSettingColor('heatmapLowColor', '#0000ff');
+    bindSettingColor('heatmapMidColor', '#00ffff');
+    bindSettingColor('heatmapHighColor', '#ff0000');
 
-    // Heatmap gradient colors
-    document.getElementById('heatmapLowColor').addEventListener('change', (e) => {
-      document.getElementById('heatmapLowColorPicker').value = e.target.value;
-      saveSetting('heatmapLowColor', e.target.value, '#0000ff');
-      redrawMap();
-    });
-    document.getElementById('heatmapLowColorPicker').addEventListener('input', (e) => {
-      document.getElementById('heatmapLowColor').value = e.target.value;
-      saveSetting('heatmapLowColor', e.target.value, '#0000ff');
-      redrawMap();
-    });
-    document.getElementById('heatmapMidColor').addEventListener('change', (e) => {
-      document.getElementById('heatmapMidColorPicker').value = e.target.value;
-      saveSetting('heatmapMidColor', e.target.value, '#00ffff');
-      redrawMap();
-    });
-    document.getElementById('heatmapMidColorPicker').addEventListener('input', (e) => {
-      document.getElementById('heatmapMidColor').value = e.target.value;
-      saveSetting('heatmapMidColor', e.target.value, '#00ffff');
-      redrawMap();
-    });
-    document.getElementById('heatmapHighColor').addEventListener('change', (e) => {
-      document.getElementById('heatmapHighColorPicker').value = e.target.value;
-      saveSetting('heatmapHighColor', e.target.value, '#ff0000');
-      redrawMap();
-    });
-    document.getElementById('heatmapHighColorPicker').addEventListener('input', (e) => {
-      document.getElementById('heatmapHighColor').value = e.target.value;
-      saveSetting('heatmapHighColor', e.target.value, '#ff0000');
-      redrawMap();
-    });
-
-    // Storage
-    document.getElementById('storageEnabled').addEventListener('change', async (e) => {
-      saveSetting('storageEnabled', e.target.checked, true);
-      await updateRefreshButton();
-    });
-
-    // Auto-fit to bounds
-    document.getElementById('autoFitToBounds').addEventListener('change', (e) => {
-      saveSetting('autoFitToBounds', e.target.checked, true);
-      // If enabled and data exists, fit immediately
-      if (e.target.checked && state.data.filtered.length > 0) {
-        fitMapToBounds();
-      } else if (!e.target.checked) {
-        // When disabling, save current position for restoration
-        saveMapPosition();
-      }
-    });
+    // Storage (refresh button state depends on the cache)
+    bindSettingCheckbox('storageEnabled', true, () => updateRefreshButton());
 
     // Dark mode toggle
     document.getElementById('darkModeToggle').addEventListener('click', () => {
-      // Get the effective current mode (system preference or explicit setting)
       const currentMode = getEffectiveDarkMode();
 
-      // Explicitly set the opposite preference
-      // We always save this to override system preference
+      // Explicitly save the opposite preference, overriding system preference
       state.settings.darkMode = !currentMode;
       localStorage.setItem('owntracks_settings', JSON.stringify(state.settings));
 
@@ -1057,8 +859,7 @@
       updateDarkModeToggle();
     });
 
-    // Clear device cache button (removes cached data for the currently
-    // selected user/device, keeps settings in localStorage)
+    // Clear cached data for the selected user/device only (settings kept)
     document.getElementById('clearDeviceCacheBtn').addEventListener('click', async () => {
       const userSel = document.getElementById('userSelect').value;
       const deviceSel = document.getElementById('deviceSelect').value;
@@ -1092,7 +893,6 @@
           await idbHelper.clearUserAllDevicesCache(userSel);
         }
 
-        // Clear any map data currently displayed
         clearMapData();
 
         location.reload();
@@ -1102,14 +902,12 @@
       }
     });
 
-    // Clear all cache button (only removes cached data from IndexedDB, keeps settings in localStorage)
+    // Clear all cached location data (settings kept)
     document.getElementById('clearAllCacheBtn').addEventListener('click', async () => {
       if (confirm('Are you sure you want to clear all cached location data? Your display settings and theme will be kept.')) {
         try {
-          // Clear IndexedDB cache
           await idbHelper.clearAllCache();
 
-          // Clear any map data currently displayed
           clearMapData();
 
           location.reload();
@@ -1120,8 +918,7 @@
       }
     });
 
-    // Clear settings button (empties localStorage, which only holds settings,
-    // without touching any cached location data in IndexedDB)
+    // Empty localStorage (settings only; IndexedDB cache is kept)
     document.getElementById('clearSettingsBtn').addEventListener('click', () => {
       if (confirm('Are you sure you want to clear all saved settings? Display settings, theme and selections will reset to defaults. Cached location data will be kept.')) {
         localStorage.clear();
@@ -1130,7 +927,7 @@
       }
     });
 
-    // Clear all data button (clears both IndexedDB cache and localStorage settings)
+    // Clear everything: IndexedDB cache and localStorage settings
     document.getElementById('clearAllDataBtn').addEventListener('click', async () => {
       if (confirm('Are you sure you want to clear ALL data? This will remove cached data, display settings, and your theme preference.')) {
         const settings = (() => {
@@ -1144,13 +941,11 @@
         })();
 
         try {
-          // Clear IndexedDB cache
           await idbHelper.clearAllCache();
         } catch (e) {
           logWarn('Failed to clear IndexedDB while clearing all storage:', e);
         }
 
-        // Clear all localStorage
         const keys = [];
         for (let i = 0; i < localStorage.length; i++) {
           const key = localStorage.key(i);
@@ -1171,22 +966,16 @@
       }
     });
 
-    // Dynamic point visibility toggle
-    document.getElementById('dynamicPointVisibility').addEventListener('change', (e) => {
-      saveSetting('dynamicPointVisibility', e.target.checked, true);
-      redrawMap();
-    });
+    // Dynamic point visibility
+    bindSettingCheckbox('dynamicPointVisibility', true);
 
-    // Console logging toggle
-    document.getElementById('consoleLoggingEnabled').addEventListener('change', (e) => {
-      saveSetting('consoleLoggingEnabled', e.target.checked, false);
-    });
+    // Console logging (no redraw needed)
+    bindSettingCheckbox('consoleLoggingEnabled', false, () => {});
 
     // Save map position/zoom when user manually changes the map (only when auto-fit is disabled)
     state.map.on('moveend', saveMapPosition);
     state.map.on('zoomend', saveMapPosition);
 
-    // Update visible point count when viewport changes
     state.map.on('moveend', updateViewportStats);
     state.map.on('zoomend', updateViewportStats);
 
@@ -1195,117 +984,73 @@
   }
 
   async function applySettingsToUI() {
-    // Display options - colors and sizes
-    if (getSetting('pointColor', '#3388ff') !== '#3388ff') {
-      document.getElementById('pointColor').value = getSetting('pointColor', '#3388ff');
-      document.getElementById('pointColorPicker').value = getSetting('pointColor', '#3388ff');
-    }
-    if (getSetting('pointSize', 2) !== 2) {
-      document.getElementById('pointSize').value = getSetting('pointSize', 2);
-    }
-    if (getSetting('pointOpacity', 0.5) !== 0.5) {
-      document.getElementById('pointOpacity').value = getSetting('pointOpacity', 0.5);
-    }
-    if (getSetting('lineColor', '#3388ff') !== '#3388ff') {
-      document.getElementById('lineColor').value = getSetting('lineColor', '#3388ff');
-      document.getElementById('lineColorPicker').value = getSetting('lineColor', '#3388ff');
-    }
-    if (getSetting('lineWidth', 3) !== 3) {
-      document.getElementById('lineWidth').value = getSetting('lineWidth', 3);
-    }
-    if (getSetting('lineOpacity', 0.7) !== 0.7) {
-      document.getElementById('lineOpacity').value = getSetting('lineOpacity', 0.7);
-    }
-    document.getElementById('smoothLines').checked = getSetting('smoothLines', false);
+    // Value inputs: [id, default] - setting key always matches the element id
+    const valueInputs = [
+      ['pointSize', 2],
+      ['pointOpacity', 0.5],
+      ['lineWidth', 3],
+      ['lineOpacity', 0.7],
+      ['altitudeMin', 0],
+      ['altitudeMax', 1000],
+      ['heatmapRadius', 25],
+      ['heatmapBlur', 15],
+      ['heatmapMinOpacity', 0.05]
+    ];
+    valueInputs.forEach(([id, def]) => {
+      document.getElementById(id).value = getSetting(id, def);
+    });
+
+    // Colour pairs: the picker input shares the setting id + "Picker"
+    const colorInputs = {
+      pointColor: '#3388ff',
+      lineColor: '#3388ff',
+      altitudePointsLowColor: '#00ff00',
+      altitudePointsHighColor: '#ff0000',
+      altitudeLinesLowColor: '#00ff00',
+      altitudeLinesHighColor: '#ff0000',
+      heatmapLowColor: '#0000ff',
+      heatmapMidColor: '#00ffff',
+      heatmapHighColor: '#ff0000'
+    };
+    Object.entries(colorInputs).forEach(([id, def]) => {
+      const value = getSetting(id, def);
+      document.getElementById(id).value = value;
+      document.getElementById(id + 'Picker').value = value;
+    });
+
+    // Checkboxes: [id, default]
+    const checkboxes = [
+      ['smoothLines', false],
+      ['altitudeEnabled', false],
+      ['altitudeLinesEnabled', false],
+      ['storageEnabled', true],
+      ['autoFitToBounds', true],
+      ['dynamicPointVisibility', true],
+      ['consoleLoggingEnabled', false]
+    ];
+    checkboxes.forEach(([id, def]) => {
+      document.getElementById(id).checked = getSetting(id, def);
+    });
 
     // Accuracy filter
     const accuracyMax = getSetting('accuracyMaxMeters', 0);
     document.getElementById('accuracySlider').value = accuracyMax;
     document.getElementById('accuracyValue').textContent = accuracyMax;
 
-    // Altitude
-    document.getElementById('altitudeEnabled').checked = getSetting('altitudeEnabled', false);
-    if (getSetting('altitudeMin', 0) !== 0) {
-      document.getElementById('altitudeMin').value = getSetting('altitudeMin', 0);
-    }
-    if (getSetting('altitudeMax', 1000) !== 1000) {
-      document.getElementById('altitudeMax').value = getSetting('altitudeMax', 1000);
-    }
-
-    // Altitude colors for points
-    if (getSetting('altitudePointsLowColor', '#00ff00') !== '#00ff00') {
-      document.getElementById('altitudePointsLowColor').value = getSetting('altitudePointsLowColor', '#00ff00');
-      document.getElementById('altitudePointsLowColorPicker').value = getSetting('altitudePointsLowColor', '#00ff00');
-    }
-    if (getSetting('altitudePointsHighColor', '#ff0000') !== '#ff0000') {
-      document.getElementById('altitudePointsHighColor').value = getSetting('altitudePointsHighColor', '#ff0000');
-      document.getElementById('altitudePointsHighColorPicker').value = getSetting('altitudePointsHighColor', '#ff0000');
-    }
-
-    // Altitude colors for lines
-    document.getElementById('altitudeLinesEnabled').checked = getSetting('altitudeLinesEnabled', false);
-    if (getSetting('altitudeLinesLowColor', '#00ff00') !== '#00ff00') {
-      document.getElementById('altitudeLinesLowColor').value = getSetting('altitudeLinesLowColor', '#00ff00');
-      document.getElementById('altitudeLinesLowColorPicker').value = getSetting('altitudeLinesLowColor', '#00ff00');
-    }
-    if (getSetting('altitudeLinesHighColor', '#ff0000') !== '#ff0000') {
-      document.getElementById('altitudeLinesHighColor').value = getSetting('altitudeLinesHighColor', '#ff0000');
-      document.getElementById('altitudeLinesHighColorPicker').value = getSetting('altitudeLinesHighColor', '#ff0000');
-    }
-
-    // Heatmap
-    if (getSetting('heatmapRadius', 25) !== 25) {
-      document.getElementById('heatmapRadius').value = getSetting('heatmapRadius', 25);
-    }
-    if (getSetting('heatmapBlur', 15) !== 15) {
-      document.getElementById('heatmapBlur').value = getSetting('heatmapBlur', 15);
-    }
-    if (getSetting('heatmapMinOpacity', 0.05) !== 0.05) {
-      document.getElementById('heatmapMinOpacity').value = getSetting('heatmapMinOpacity', 0.05);
-    }
-
-    // Heatmap gradient colors
-    if (getSetting('heatmapLowColor', '#0000ff') !== '#0000ff') {
-      document.getElementById('heatmapLowColor').value = getSetting('heatmapLowColor', '#0000ff');
-      document.getElementById('heatmapLowColorPicker').value = getSetting('heatmapLowColor', '#0000ff');
-    }
-    if (getSetting('heatmapMidColor', '#00ffff') !== '#00ffff') {
-      document.getElementById('heatmapMidColor').value = getSetting('heatmapMidColor', '#00ffff');
-      document.getElementById('heatmapMidColorPicker').value = getSetting('heatmapMidColor', '#00ffff');
-    }
-    if (getSetting('heatmapHighColor', '#ff0000') !== '#ff0000') {
-      document.getElementById('heatmapHighColor').value = getSetting('heatmapHighColor', '#ff0000');
-      document.getElementById('heatmapHighColorPicker').value = getSetting('heatmapHighColor', '#ff0000');
-    }
-
-    // Storage
-    document.getElementById('storageEnabled').checked = getSetting('storageEnabled', true);
     await updateRefreshButton();
 
-    // Auto-fit to bounds
-    document.getElementById('autoFitToBounds').checked = getSetting('autoFitToBounds', true);
-
-    // Dynamic point visibility
-    document.getElementById('dynamicPointVisibility').checked = getSetting('dynamicPointVisibility', true);
-
-    // Console logging
-    document.getElementById('consoleLoggingEnabled').checked = getSetting('consoleLoggingEnabled', false);
-
     // Dark mode toggle is updated in applyTheme()
-
     updateQuickActionsBar();
   }
 
-  // Toggle one of the dock-driven display settings (points/lines/heatmap).
-  // Persisted with a null default so an explicit toggle always wins over any
-  // config-file value (e.g. display.heatmap.enabled from environment.json)
+  // Dock-driven display toggles, persisted with a null default so an
+  // explicit toggle always wins over config-file values
   function toggleDisplaySetting(key, defaultValue) {
     saveSetting(key, !getSetting(key, defaultValue), null);
     redrawMap();
     updateQuickActionsBar();
   }
 
-  // Reflect the display settings onto the floating quick actions dock
   function updateQuickActionsBar() {
     const points = getSetting('showPoints', true);
     const lines = getSetting('showLines', true);
@@ -1333,9 +1078,8 @@
     overlay.classList.add('visible');
     overlay.setAttribute('aria-hidden', 'false');
     document.getElementById('helpFab')?.setAttribute('aria-expanded', 'true');
-    // Move focus into the overlay so keyboard input (including Leaflet's map
-    // navigation keys on a focused map container) no longer reaches the app
-    // underneath while the overlay is open
+    // Focus the overlay so keyboard input (incl. Leaflet's map keys)
+    // can't reach the app underneath
     overlay.focus();
   }
 
@@ -1351,7 +1095,6 @@
     helpOverlayReturnFocus = null;
   }
 
-  // Keyboard counterpart of the dynamicPointVisibility checkbox change handler
   function toggleDynamicPointVisibility() {
     const next = !getSetting('dynamicPointVisibility', true);
     saveSetting('dynamicPointVisibility', next, true);
@@ -1365,9 +1108,7 @@
 
     const overlay = document.getElementById('helpOverlay');
 
-    // While the help overlay is open it captures all keyboard input: only
-    // ? and Escape dismiss it and Tab is trapped inside, so no keys reach
-    // the app underneath
+    // With the overlay open only ? and Escape dismiss it, and Tab is trapped inside
     if (overlay.classList.contains('visible')) {
       if (e.key === 'Escape' || e.key === '?') {
         e.preventDefault();
@@ -1426,8 +1167,7 @@
     sidebar.classList.toggle('open', state.sidebarOpen);
     saveSetting('sidebarOpen', state.sidebarOpen, true);
 
-    // If auto-fit is enabled and we have data loaded, re-fit bounds to account for sidebar
-    // Delay slightly to allow sidebar transition to start
+    // Re-fit (if auto-fit on) once the sidebar transition has started
     if (getSetting('autoFitToBounds', true) && state.data.filtered.length > 0) {
       setTimeout(() => {
         fitMapToBounds();
@@ -1436,17 +1176,13 @@
   }
 
   function saveMapPosition(force) {
-    // Only save if auto-fit is disabled (user wants manual control), unless
-    // forced - forced saves record the result of a completed auto-fit so
-    // turning auto-fit off later keeps the current view instead of jumping
-    // back to a stale position
+    // Only save manual positions; forced saves record a completed auto-fit
+    // so turning auto-fit off later keeps the current view
     if (!force && getSetting('autoFitToBounds', true)) {
       return;
     }
 
-    // Don't save positions caused by programmatic moves (initial view,
-    // restore, mid-animation frames) - only genuine user interaction or a
-    // completed auto-fit should persist
+    // Never persist programmatic moves (initial view, restore, mid-animation)
     if (!force && state.suppressMapSave) {
       return;
     }
@@ -1458,11 +1194,8 @@
     saveSetting('mapZoom', zoom, null);
   }
 
-  /**
-   * Run a programmatic map view change (setView/fitBounds) without it being
-   * persisted as a user map position. Fitted views are saved separately via
-   * the forced save in fitMapToBounds.
-   */
+  // Run a programmatic view change (setView/fitBounds) without persisting
+  // it as a user map position
   function applyProgrammaticMapView(fn) {
     state.suppressMapSave = true;
     try {
@@ -1506,16 +1239,13 @@
     document.querySelectorAll('.section-toggle:not(.collapsed)').forEach(toggle => {
       const content = toggle.nextElementSibling;
       if (content) {
-        // Temporarily disable transitions for accurate measurement
         content.style.transition = 'none';
         content.style.maxHeight = 'none';
 
-        // Force a complete reflow before measuring
         void content.offsetHeight;
 
         const height = content.scrollHeight;
 
-        // Re-enable transitions and set height
         content.style.transition = '';
         if (height > 0) {
           content.style.maxHeight = `${height}px`;
@@ -1541,19 +1271,20 @@
     });
   }
 
-  function syncSectionHeights(target) {
-    const parentSection = target.closest('.sidebar-section');
-    if (parentSection) {
-      const parentContent = parentSection.querySelector(':scope > .section-content');
-      if (parentContent) {
-        parentContent.style.maxHeight = 'none';
-        requestAnimationFrame(() => {
-          const height = parentContent.scrollHeight;
-          if (height > 0) {
-            parentContent.style.maxHeight = `${height}px`;
-          }
-        });
-      }
+  // Expand from 0 to natural height: measure uncapped with transitions
+  // off, then animate
+  function animateExpand(content) {
+    content.style.transition = 'none';
+    content.style.maxHeight = 'none';
+    void content.offsetHeight; // Force reflow
+
+    const targetHeight = content.scrollHeight;
+    content.style.transition = '';
+
+    if (targetHeight > 0) {
+      content.style.maxHeight = '0';
+      void content.offsetHeight;
+      content.style.maxHeight = `${targetHeight}px`;
     }
   }
 
@@ -1579,8 +1310,7 @@
         toggle.classList.add('collapsed');
         content.style.maxHeight = '0';
       } else {
-        // Don't set maxHeight during initialization - let content flow naturally
-        // It will be set later after all async content is loaded
+        // No maxHeight during init - set later once async content has loaded
         content.style.maxHeight = 'none';
       }
 
@@ -1594,36 +1324,7 @@
         } else {
           // Remove collapsed class FIRST to restore padding
           toggle.classList.remove('collapsed');
-
-          // Now measure with full padding
-          content.style.transition = 'none';
-          content.style.maxHeight = 'none';
-          void content.offsetHeight; // Force reflow
-
-          const targetHeight = content.scrollHeight;
-
-          content.style.transition = '';
-
-          if (targetHeight > 0) {
-            // Animate from 0 to target height
-            content.style.maxHeight = '0';
-            void content.offsetHeight;
-            content.style.maxHeight = `${targetHeight}px`;
-          }
-        }
-      });
-
-      window.addEventListener('resize', () => {
-        if (!toggle.classList.contains('collapsed')) {
-          content.style.maxHeight = 'none';
-          requestAnimationFrame(() => {
-            if (!toggle.classList.contains('collapsed')) {
-              const height = content.scrollHeight;
-              if (height > 0) {
-                content.style.maxHeight = `${height}px`;
-              }
-            }
-          });
+          animateExpand(content);
         }
       });
     });
@@ -1638,10 +1339,34 @@
         header.classList.add('collapsed');
         content.style.maxHeight = '0';
       } else {
-        // Don't set maxHeight during initialization - let content flow naturally
-        // It will be set later after all async content is loaded
         content.style.maxHeight = 'none';
       }
+
+      // The parent section-content must re-measure after a sub-section
+      // animates, or its max-height caps the wrong value
+      const expandedParentContent = () => {
+        const parentSection = header.closest('.sidebar-section');
+        const parentContent = parentSection?.querySelector(':scope > .section-content');
+        const parentToggle = parentSection?.querySelector(':scope > .section-toggle');
+        return (parentContent && !parentToggle?.classList.contains('collapsed'))
+          ? parentContent
+          : null;
+      };
+
+      const remeasureParent = () => {
+        const parentContent = expandedParentContent();
+        if (!parentContent) return;
+
+        parentContent.style.transition = 'none';
+        parentContent.style.maxHeight = 'none';
+        void parentContent.offsetHeight; // Force reflow
+
+        const height = parentContent.scrollHeight;
+        parentContent.style.transition = '';
+        if (height > 0) {
+          parentContent.style.maxHeight = `${height}px`;
+        }
+      };
 
       header.addEventListener('click', () => {
         const willCollapse = !header.classList.contains('collapsed');
@@ -1650,90 +1375,25 @@
         if (willCollapse) {
           header.classList.add('collapsed');
           content.style.maxHeight = '0';
-
-          // Update parent section height after collapse animation
-          const parentSection = header.closest('.sidebar-section');
-          if (parentSection) {
-            const parentContent = parentSection.querySelector(':scope > .section-content');
-            const parentToggle = parentSection.querySelector(':scope > .section-toggle');
-
-            if (parentContent && !parentToggle?.classList.contains('collapsed')) {
-              setTimeout(() => {
-                parentContent.style.transition = 'none';
-                parentContent.style.maxHeight = 'none';
-                void parentContent.offsetHeight; // Force reflow
-
-                const height = parentContent.scrollHeight;
-                parentContent.style.transition = '';
-
-                if (height > 0) {
-                  parentContent.style.maxHeight = `${height}px`;
-                }
-              }, 300);
-            }
-          }
+          // Re-measure after the collapse animation finishes
+          setTimeout(remeasureParent, 300);
         } else {
           // Remove collapsed class FIRST to restore padding
           header.classList.remove('collapsed');
+          animateExpand(content);
 
-          // Now measure with full padding
-          content.style.transition = 'none';
-          content.style.maxHeight = 'none';
-          void content.offsetHeight; // Force reflow
-
-          const targetHeight = content.scrollHeight;
-
-          content.style.transition = '';
-
-          if (targetHeight > 0) {
-            // Animate from 0 to target height
-            content.style.maxHeight = '0';
-            void content.offsetHeight;
-            content.style.maxHeight = `${targetHeight}px`;
-
-            // Get parent section and set it to accommodate the expansion
-            const parentSection = header.closest('.sidebar-section');
-            if (parentSection) {
-              const parentContent = parentSection.querySelector(':scope > .section-content');
-              const parentToggle = parentSection.querySelector(':scope > .section-toggle');
-
-              if (parentContent && !parentToggle?.classList.contains('collapsed')) {
-                // Set parent to auto height during child animation to prevent constraining
-                parentContent.style.maxHeight = 'none';
-
-                // After animation completes, set the final height
-                setTimeout(() => {
-                  parentContent.style.transition = 'none';
-                  parentContent.style.maxHeight = 'none';
-                  void parentContent.offsetHeight; // Force reflow
-
-                  const height = parentContent.scrollHeight;
-                  parentContent.style.transition = '';
-
-                  if (height > 0) {
-                    parentContent.style.maxHeight = `${height}px`;
-                  }
-                }, 300);
-              }
-            }
+          // Unconstrained while the child animates; pinned once it settles
+          const parentContent = expandedParentContent();
+          if (parentContent) {
+            parentContent.style.maxHeight = 'none';
           }
-        }
-      });
-
-      window.addEventListener('resize', () => {
-        if (!header.classList.contains('collapsed')) {
-          content.style.maxHeight = 'none';
-          requestAnimationFrame(() => {
-            if (!header.classList.contains('collapsed')) {
-              const height = content.scrollHeight;
-              if (height > 0) {
-                content.style.maxHeight = `${height}px`;
-              }
-            }
-          });
+          setTimeout(remeasureParent, 300);
         }
       });
     });
+
+    // One shared resize handler instead of one listener per toggle
+    window.addEventListener('resize', recalculateAllSectionHeights);
   }
 
   // ============================================================================
@@ -1762,13 +1422,11 @@
   function applyTheme() {
     const darkMode = getEffectiveDarkMode();
 
-    // Update both html and body elements
     document.documentElement.classList.toggle('dark-mode', darkMode);
     document.documentElement.classList.toggle('light-mode', !darkMode);
     document.body.classList.toggle('dark-mode', darkMode);
     document.body.classList.toggle('light-mode', !darkMode);
 
-    // Update inline background styles
     document.documentElement.style.backgroundColor = darkMode ? '#1a1a1a' : '#f8f9fa';
     document.documentElement.style.color = darkMode ? '#e0e0e0' : '#212529';
 
@@ -1792,7 +1450,6 @@
       try {
         const settings = JSON.parse(saved || '{}');
         if (typeof settings.darkMode !== 'boolean') {
-          // No explicit preference, so update based on new system preference
           applyTheme();
         }
       } catch (e) {
@@ -1824,8 +1481,7 @@
         setDateInputs(from, to);
       }
     } else {
-      // Presets are resolved against the current date (never a "today"
-      // captured at page load) and re-resolved on every subsequent query
+      // Presets resolve against the current date, re-resolved on every query
       const { from, to } = resolveDatePreset(preset);
       setDateInputs(from, to);
     }
@@ -1843,45 +1499,30 @@
   }
 
   function formatDateForAPI(date, timeBoundary) {
-    // Format local date to UTC for API
-    // The input 'date' is in local time (e.g., local midnight)
-    // We need to convert it to UTC and return the UTC date boundary
-
-    // Get the local date components (year, month, day) from the input
-    // This represents the user's intent - "this date in my timezone"
+    // Convert a local-time boundary date to UTC for the API, preserving
+    // the user's intent ("this date in my timezone")
     const localYear = date.getFullYear();
     const localMonth = date.getMonth();
     const localDay = date.getDate();
 
     if (timeBoundary === 'start') {
-      // For start times: local midnight -> UTC midnight of that local date
-      // Create a date representing local midnight on the intended date
+      // Start: local midnight -> UTC midnight of that local date
       const localMidnight = new Date(localYear, localMonth, localDay, 0, 0, 0);
 
-      // Convert to UTC - this gives us the correct UTC timestamp
       const result = localMidnight.toISOString().substring(0, 19); // YYYY-MM-DDTHH:mm:ss in UTC
       log(`[Date Debug] Local midnight ${localMidnight} -> UTC: ${result}`);
       return result;
     } else {
-      // For end times: local end of day -> UTC 23:59:59 of that local date
-      // Create a date representing local end of day on the intended date
+      // End: local end of day -> UTC 23:59:59 of that local date
       const localEndOfDay = new Date(localYear, localMonth, localDay, 23, 59, 59, 999);
 
-      // Convert to UTC - this gives us the correct UTC timestamp
       const result = localEndOfDay.toISOString().substring(0, 19); // YYYY-MM-DDTHH:mm:ss in UTC
       log(`[Date Debug] Local end-of-day ${localEndOfDay} -> UTC: ${result}`);
       return result;
     }
   }
 
-  function formatCurrentTimeForAPI(date) {
-    // Format current local date and time to UTC for API
-    // Simply convert the local time to UTC
-    return date.toISOString().substring(0, 19); // YYYY-MM-DDTHH:mm:ss in UTC
-  }
-
-  // Convert a UTC timestamp (from API) to the user's local date string (YYYY-MM-DD)
-  // This is used for cache keys so they're consistent with the user's timezone
+  // UTC timestamp -> local YYYY-MM-DD, used for cache keys (user's timezone)
   function utcToLocalDateString(utcTimestamp) {
     const date = new Date(utcTimestamp * 1000);
     const year = date.getFullYear();
@@ -1890,18 +1531,6 @@
     const result = `${year}-${month}-${day}`;
     log(`[Date Debug] UTC timestamp ${utcTimestamp} (${date.toISOString()}) -> Local date: ${result}`);
     return result;
-  }
-
-  // Convert a local date string (from UI) to the corresponding UTC date string
-  // This is used to understand which UTC day a local date selection represents
-  function localDateToUtcDateString(localDateString) {
-    // localDateString is YYYY-MM-DD representing local midnight
-    const date = new Date(localDateString + 'T00:00:00');
-    const utcDate = new Date(date.getTime() - (date.getTimezoneOffset() * 60000));
-    const year = utcDate.getUTCFullYear();
-    const month = String(utcDate.getUTCMonth() + 1).padStart(2, '0');
-    const day = String(utcDate.getUTCDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
   }
 
   function formatDateTimeForInput(date) {
@@ -1916,17 +1545,16 @@
   function getDateRange() {
     const preset = getSetting('datePreset', '30days');
 
-    // An active preset is re-resolved against the current moment so a page
-    // left open across midnight never queries with a stale "today". The
-    // inputs are synced so the text boxes always show what will be queried.
+    // Active presets re-resolve now (a page left open across midnight never
+    // queries a stale "today"); inputs are synced to match
     if (preset !== 'custom') {
       const { from, to } = resolveDatePreset(preset);
       setDateInputs(from, to);
       return { from, to };
     }
 
-    // Custom range: dates picked via the date picker, stored as local time
-    // ("YYYY-MM-DDTHH:mm", converted to UTC only when the API query is built)
+    // Custom range: local "YYYY-MM-DDTHH:mm" strings, converted to UTC at
+    // query time
     const fromVal = document.getElementById('fromDate').dataset.value || document.getElementById('fromDate').value;
     const toVal = document.getElementById('toDate').dataset.value || document.getElementById('toDate').value;
     return {
@@ -1935,20 +1563,19 @@
     };
   }
 
+  // Built once - Intl.DateTimeFormat construction is expensive
+  const displayDateFormatter = new Intl.DateTimeFormat('en-GB', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric'
+  });
+
   function formatDisplayDate(dateValue) {
-    const date = new Date(dateValue);
-    return new Intl.DateTimeFormat('en-GB', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric'
-    }).format(date);
+    return displayDateFormatter.format(new Date(dateValue));
   }
 
-  /**
-   * Resolve a named date preset against the current moment. All boundaries
-   * are local time (local midnight / local end of day); conversion to UTC
-   * happens only when the API query is built.
-   */
+  // Resolve a named preset against the current moment; boundaries are
+  // local time (UTC conversion happens at query time)
   function resolveDatePreset(preset) {
     const now = new Date();
     const to = new Date(now);
@@ -2108,11 +1735,7 @@
         userSelect.appendChild(option);
       });
 
-      // Pick which user should be selected:
-      // 1. Previously selected user (localStorage), if still available
-      // 2. Config default user, if valid
-      // 3. The only user, if there is exactly one
-      // 4. Otherwise leave unselected ("-")
+      // Pick the user: saved selection > config default > the only user > none
       const savedUser = getSetting('selectedUser', '');
       const defaultUser = window.CONFIG.defaults?.user;
       let userToSelect = '';
@@ -2126,8 +1749,7 @@
       }
 
       userSelect.value = userToSelect;
-      // No saveSetting here: the selection is only persisted when the user
-      // explicitly changes it, so config/only-user defaults stay live
+      // No saveSetting here - only explicit user changes are persisted
 
       // Populate the device dropdown for whichever user is now selected
       await updateDeviceSelect();
@@ -2168,16 +1790,10 @@
     return devices;
   }
 
-  /**
-   * Repopulate the device dropdown based on the currently selected user.
-   *
-   * Selection priority: previously selected device (localStorage, if still
-   * available) > config default device > the only device > unselected ("-").
-   *
-   * With "All Users" selected the device dropdown is hidden and the selection
-   * is treated as "All Devices"; the device list of every user is still
-   * fetched so "Load Data" can enumerate all user/device combinations.
-   */
+  // Repopulate the device dropdown for the selected user. Selection
+  // priority: saved device > config default > the only device > "-". With
+  // "All Users" the dropdown hides (treated as "All Devices") but every
+  // user's device list is still fetched for "Load Data".
   async function updateDeviceSelect() {
     clearHeaderError();
     const userSelect = document.getElementById('userSelect');
@@ -2206,7 +1822,6 @@
       placeholder.textContent = '-';
       deviceSelect.appendChild(placeholder);
       deviceSelect.value = '';
-      state.data.devices = [];
       recalcHeights();
       return;
     }
@@ -2215,8 +1830,7 @@
       if (allUsers) {
         showLoading('Loading devices for all users...');
 
-        // Fetch every user's device list (in parallel) so "Load Data" can
-        // enumerate all user/device combinations without further list calls
+        // Fetch every user's device list in parallel for later enumeration
         const results = await Promise.allSettled(
           state.data.users.map(u => fetchDevicesForUser(u))
         );
@@ -2237,11 +1851,9 @@
         allDevicesOption.textContent = 'All Devices';
         deviceSelect.appendChild(allDevicesOption);
         deviceSelect.value = ALL_SELECTOR;
-        state.data.devices = [];
       } else {
         showLoading(`Loading devices for ${user}...`);
         const devices = await fetchDevicesForUser(user);
-        state.data.devices = devices;
 
         // Populate device dropdown: "-" placeholder, "All Devices", then each device
         deviceSelect.innerHTML = '';
@@ -2278,10 +1890,8 @@
         deviceSelect.value = deviceToSelect;
         // No saveSetting here: only explicit user changes are persisted
 
-        // Auto-load only for a single specific user/device pair, and only when
-        // it already has cached data. "All Users"/"All Devices" selections stay
-        // behind an explicit "Load Data" click so page load doesn't fire off a
-        // swarm of API requests.
+        // Auto-load only a single user/device pair that already has cached
+        // data; all-selections wait for an explicit Load Data click
         if (deviceToSelect && deviceToSelect !== ALL_SELECTOR) {
           const storageEnabled = getSetting('storageEnabled', true);
           if (storageEnabled) {
@@ -2306,11 +1916,8 @@
     }
   }
 
-  /**
-   * Resolve the currently selected user/device dropdown values into the list
-   * of concrete user/device combinations to load. "All Users"/"All Devices"
-   * expand to every matching combination.
-   */
+  // Expand the current selection into the concrete user/device combos to
+  // load ("All Users"/"All Devices" expand to every match)
   async function resolveSelectedCombos() {
     const userSel = document.getElementById('userSelect').value;
     // "All Users" always implies "All Devices" (the device dropdown is hidden)
@@ -2346,25 +1953,46 @@
     return combos;
   }
 
-  /**
-   * Load data for a single user/device combination: cached days first, then
-   * API requests for any uncached day ranges. If the current moment falls
-   * inside the requested range, today's cache is refreshed first with a
-   * dedicated midnight-to-midnight API request so newly recorded points are
-   * picked up. `label` identifies the combo in the loading overlay (e.g.
-   * "2/5 simon/iphone"). Returns the combined points plus per-source counts
-   * for the stats display.
-   */
+  // Fetch locations for one user/device. Boundaries are local-time Dates
+  // (e.g. local midnight / local end of day), converted to UTC for the API.
+  async function fetchLocations(user, device, rangeFrom, rangeTo) {
+    const fromStr = formatDateForAPI(rangeFrom, 'start');
+    const toStr = formatDateForAPI(rangeTo, 'end');
+
+    log(`[Date Debug] API Request: User ${user}, Device ${device}`);
+    log(`[Date Debug] Local date objects: ${rangeFrom.toLocaleString()} to ${rangeTo.toLocaleString()}`);
+    log(`[Date Debug] UTC for API: from=${fromStr}, to=${toStr}`);
+
+    const url = `${window.CONFIG.api.url}/api/0/locations?` +
+      `from=${encodeURIComponent(fromStr)}&` +
+      `to=${encodeURIComponent(toStr)}&` +
+      `user=${encodeURIComponent(user)}&` +
+      `device=${encodeURIComponent(device)}&` +
+      `format=json`;
+
+    const response = await fetchWithTimeout(url, {
+      headers: buildAuthHeaders()
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch locations: ${response.status}`);
+    }
+
+    const result = await response.json();
+    return result.data || [];
+  }
+
+  // Load one user/device combo: refresh today if the range includes it,
+  // then cached days, then API fetches for uncached ranges. `label` names
+  // the combo in the loading overlay; returns points + cached/fresh counts.
   async function loadDataForCombo(user, device, fromDate, toDate, requestedDays, storageEnabled, label) {
     let comboData = [];
     let cachedCount = 0;
     let freshCount = 0;
 
     if (storageEnabled) {
-      // If the current date/time is inside the requested range, refresh
-      // today's cache with a today-only request (local midnight to local
-      // midnight, converted to UTC for the API) before reading the cache.
-      // Ranges entirely in the past keep the plain cache-first behaviour.
+      // If the range includes today, refresh today's cache before reading
+      // it so newly recorded points are picked up
       const todayKey = formatDateForInput(new Date());
       let todayRefreshed = false;
 
@@ -2373,42 +2001,21 @@
           showLoading(`Updating today's data for ${label}...`);
           const todayFrom = new Date(todayKey + 'T00:00:00');
           const todayTo = new Date(todayKey + 'T23:59:59');
-          const fromStr = formatDateForAPI(todayFrom, 'start');
-          const toStr = formatDateForAPI(todayTo, 'end');
 
-          log(`[Today Refresh] Fetching ${todayKey} for ${label}: from=${fromStr}, to=${toStr}`);
+          log(`[Today Refresh] Fetching ${todayKey} for ${label}`);
 
-          const todayUrl = `${window.CONFIG.api.url}/api/0/locations?` +
-            `from=${encodeURIComponent(fromStr)}&` +
-            `to=${encodeURIComponent(toStr)}&` +
-            `user=${encodeURIComponent(user)}&` +
-            `device=${encodeURIComponent(device)}&` +
-            `format=json`;
-
-          const response = await fetchWithTimeout(todayUrl, {
-            headers: buildAuthHeaders()
-          });
-
-          if (!response.ok) {
-            throw new Error(`Failed to fetch locations: ${response.status}`);
-          }
-
-          const result = await response.json();
-          const todayData = result.data || [];
+          const todayData = await fetchLocations(user, device, todayFrom, todayTo);
           freshCount += todayData.length;
 
-          // Cache the full day (even when empty) so the uncached-range fetch
-          // below doesn't request today again
+          // Cache the full day (even when empty) so it isn't re-requested below
           const dailyData = splitDataByDays(todayData, todayKey, todayKey);
           await cacheDailyData(user, device, dailyData);
 
-          // Today's points are counted as fresh, so skip today when loading
-          // the rest of the range from cache to avoid counting it twice
+          // Today is already counted as fresh - skip it when reading cache
           todayRefreshed = true;
           comboData = comboData.concat(todayData);
         } catch (e) {
-          // Best-effort: fall back to whatever the cache already holds for
-          // today so fully-cached ranges still load without an API
+          // Best-effort: fall back to whatever the cache holds for today
           logWarn(`Failed to refresh today's data for ${label}:`, e.message);
         }
       }
@@ -2444,35 +2051,11 @@
         'This may take several minutes for large date ranges.'
       );
 
+      log(`[Date Debug] Requested local range: ${range.from} to ${range.to}`);
+
       const rangeFrom = new Date(range.from + 'T00:00:00');
       const rangeTo = new Date(range.to + 'T23:59:59');
-
-      // Use local time formatting to avoid timezone issues
-      const fromStr = formatDateForAPI(rangeFrom, 'start');
-      const toStr = formatDateForAPI(rangeTo, 'end');
-
-      log(`[Date Debug] API Request: User ${user}, Device ${device}`);
-      log(`[Date Debug] Requested local range: ${range.from} to ${range.to}`);
-      log(`[Date Debug] Local date objects: ${rangeFrom.toLocaleString()} to ${rangeTo.toLocaleString()}`);
-      log(`[Date Debug] UTC for API: from=${fromStr}, to=${toStr}`);
-
-      const locationsUrl = `${window.CONFIG.api.url}/api/0/locations?` +
-        `from=${encodeURIComponent(fromStr)}&` +
-        `to=${encodeURIComponent(toStr)}&` +
-        `user=${encodeURIComponent(user)}&` +
-        `device=${encodeURIComponent(device)}&` +
-        `format=json`;
-
-      const response = await fetchWithTimeout(locationsUrl, {
-        headers: buildAuthHeaders()
-      });
-
-      if (!response.ok) {
-        throw new Error(`Failed to fetch locations: ${response.status}`);
-      }
-
-      const result = await response.json();
-      const rangeData = result.data || [];
+      const rangeData = await fetchLocations(user, device, rangeFrom, rangeTo);
 
       // Track fresh point count
       freshCount += rangeData.length;
@@ -2539,8 +2122,8 @@
         allData = allData.concat(comboResult.data);
       }
 
-      // Sort so each user/device track stays contiguous (avoids route lines
-      // jumping between devices), ordered by time within each track
+      // Keep each user/device track contiguous so route lines don't jump
+      // between devices
       allData.sort((a, b) => {
         const userCmp = String(a.user || '').localeCompare(String(b.user || ''));
         if (userCmp !== 0) return userCmp;
@@ -2558,19 +2141,17 @@
 
       // Handle empty results
       if (state.data.raw.length === 0) {
-        // Clear data layers but keep current map position
-        clearMapLayersOnly();
+        // Clear data layers (keeps the current map position)
+        clearMapData();
         hideLoading();
         updateHeaderStatus('No data found for selected date range');
         return;
       }
 
-      // Enable recenter on the quick actions dock when we have data
       document.getElementById('qaRecenter').disabled = false;
 
-      // Single pass over all points for time range and max accuracy.
-      // (Deliberately not Math.min(...spread) - spreading a large array
-      // exceeds the argument limit and throws "Maximum call stack size exceeded")
+      // Single pass for time range and max accuracy. No Math.min(...spread):
+      // spreading a large array exceeds the argument limit (issue #3)
       let tstMin = Infinity;
       let tstMax = -Infinity;
       state.data.maxAccuracy = 0;
@@ -2583,18 +2164,14 @@
       });
       state.data.timeRange = { start: tstMin, end: tstMax };
 
-      // Update accuracy slider max
       const sliderMax = Math.max(500, Math.ceil(state.data.maxAccuracy / 10) * 10);
       document.getElementById('accuracySlider').max = sliderMax;
 
-      // Apply accuracy filter
       applyAccuracyFilter();
 
-      // Update stats and cache status
       updateStats();
       await updateRefreshButton();
 
-      // Redraw map
       redrawMap();
 
       hideLoading();
@@ -2606,17 +2183,8 @@
         restoreMapPosition();
       }
 
-      // Update data source indicator
-      const hasCached = state.data.sourceBreakdown.cached > 0;
-      const hasFresh = state.data.sourceBreakdown.fresh > 0;
-
-      if (hasCached && hasFresh) {
-        updateDataSourceIndicator('mixed');
-      } else if (hasCached) {
-        updateDataSourceIndicator(true);
-      } else {
-        updateDataSourceIndicator(false);
-      }
+      // Clear any stale status message now that data has loaded successfully
+      updateHeaderStatus('');
 
     } catch (error) {
       showLoadingError('Failed to load locations: ' + error.message);
@@ -2628,6 +2196,7 @@
     }
   }
 
+  // Reset loaded data and clear layers; current map position is preserved
   function clearMapData() {
     state.data.raw = [];
     state.data.filtered = [];
@@ -2636,21 +2205,7 @@
     state.data.sourceBreakdown = { cached: 0, fresh: 0 };
     redrawMap();
     updateStats();
-    updateDataSourceIndicator(false);
     document.getElementById('qaRecenter').disabled = true;
-  }
-
-  function clearMapLayersOnly() {
-    state.data.raw = [];
-    state.data.filtered = [];
-    state.data.maxAccuracy = 0;
-    state.data.timeRange = { start: null, end: null };
-    state.data.sourceBreakdown = { cached: 0, fresh: 0 };
-    redrawMap();
-    updateStats();
-    updateDataSourceIndicator(false);
-    document.getElementById('qaRecenter').disabled = true;
-    // Note: We don't fit bounds here, so current map position is preserved
   }
 
   // ============================================================================
@@ -2747,7 +2302,6 @@
         };
         getRequest.onerror = () => reject(getRequest.error);
 
-        // Wait for transaction to complete
         tx.oncomplete = () => resolve();
         tx.onerror = () => reject(tx.error);
       });
@@ -2820,7 +2374,6 @@
           };
           request.onerror = () => reject(request.error);
 
-          // Wait for transaction to complete
           tx.oncomplete = () => resolve(true);
           tx.onerror = () => reject(tx.error);
         } catch (e) {
@@ -2857,7 +2410,6 @@
         indexStore.delete([user, device]);
 
         // Clear all cache entries for this user/device
-        // Note: We need to iterate since we can't do a range delete on compound keys efficiently
         const cacheStore = tx.objectStore(STORE_CACHE);
         const request = cacheStore.openCursor(
           IDBKeyRange.bound([user, device, ''], [user, device, '￿'])
@@ -2915,9 +2467,8 @@
       });
     },
 
-    // Calculate storage usage for IndexedDB. Returns the bytes used by the
-    // given user/device (selection) alongside the total across all
-    // users/devices; omit user/device to count everything as the selection
+    // Bytes used by the given user/device alongside the total; omit
+    // user/device to count everything as the selection
     async getStorageUsage(user, device) {
       const db = await this.open();
       return new Promise((resolve, reject) => {
@@ -2973,7 +2524,7 @@
     return days;
   }
 
-  // Get set of cached days for user/device (now uses IndexedDB)
+  // Get set of cached days for user/device
   async function getCachedDays(user, device) {
     try {
       return await idbHelper.getCachedDays(user, device);
@@ -2983,7 +2534,7 @@
     }
   }
 
-  // Update cache index with new days (now uses IndexedDB)
+  // Update cache index with new days
   async function updateCacheIndex(user, device, newDays) {
     try {
       await idbHelper.updateCacheIndex(user, device, newDays);
@@ -2992,7 +2543,7 @@
     }
   }
 
-  // Load cached data for specific days (now uses IndexedDB)
+  // Load cached data for specific days
   async function loadCachedDays(user, device, days) {
     try {
       return await idbHelper.getCachedData(user, device, days);
@@ -3008,14 +2559,12 @@
     const dailyData = {};
     const days = getDaysInRange(fromDate, toDate);
 
-    // Initialize empty arrays for each day
     days.forEach(day => {
       dailyData[day] = [];
     });
 
     // Split points by their LOCAL timestamp date (user's timezone)
     data.forEach(point => {
-      // Convert UTC timestamp to local date string for cache key
       const dateStr = utcToLocalDateString(point.tst);
 
       // Only include points within our requested range
@@ -3027,17 +2576,14 @@
     return dailyData;
   }
 
-  // Compress data using gzip compression
-  // Returns Uint8Array for IndexedDB storage
+  // Gzip-compress points to a Uint8Array for IndexedDB storage
   function compressPoints(points) {
     if (!points || points.length === 0) return new Uint8Array(0);
 
     const jsonStr = JSON.stringify(points);
 
-    // Check if pako is available for gzip compression
     if (typeof window.pako !== 'undefined') {
       try {
-        // Compress with gzip (highest compression level)
         return window.pako.gzip(jsonStr, { level: 9 });
       } catch (e) {
         logWarn('Gzip compression failed, using uncompressed:', e);
@@ -3056,7 +2602,6 @@
   function decompressPoints(compressed) {
     if (!compressed) return [];
 
-    // Handle empty Uint8Array
     if (compressed instanceof Uint8Array && compressed.byteLength === 0) {
       return [];
     }
@@ -3070,7 +2615,6 @@
 
     if (typeof window.pako !== 'undefined') {
       try {
-        // Try to decompress as gzip
         jsonStr = window.pako.ungzip(compressed, { to: 'string' });
       } catch (e) {
         // Not compressed, decode as UTF-8
@@ -3091,7 +2635,6 @@
 
     for (const [day, points] of Object.entries(dailyData)) {
       try {
-        // Compress and store the data directly to IndexedDB
         await idbHelper.setDayData(user, device, day, points);
         successfullyCached.push(day);
       } catch (e) {
@@ -3188,10 +2731,38 @@
     };
   }
 
+  // Point sampling rate for the current zoom/dataset size - shared by
+  // redrawMap, handleProximityClick and updateViewportStats so all three
+  // agree on which points are "drawn". 1 = draw everything.
+  function getPointSampleRate() {
+    const totalPoints = state.data.filtered.length;
+    if (!getSetting('dynamicPointVisibility', true) || totalPoints <= 2000) {
+      return 1;
+    }
+
+    // Higher zoom = more detail, lower zoom = more aggressive sampling
+    const zoom = state.map.getZoom();
+    const zoomFactor = Math.max(0.05, (zoom - 2) / 14); // 0.05 to 1.0 based on zoom
+    const densityFactor = Math.max(0.1, 3000 / totalPoints); // Target ~3000 visible points
+    const combinedFactor = zoomFactor * densityFactor;
+
+    if (combinedFactor < 0.01) {
+      // Very zoomed out: aggressive sampling
+      return Math.max(10, Math.min(50, Math.ceil(100 * combinedFactor / 2)));
+    } else if (combinedFactor < 0.05) {
+      // Zoomed out: moderate sampling
+      return Math.max(5, Math.min(20, Math.ceil(1 / combinedFactor / 2)));
+    } else if (combinedFactor < 0.15) {
+      // Mid zoom: light sampling
+      return Math.max(2, Math.min(10, Math.ceil(1 / combinedFactor / 3)));
+    }
+    // Zoomed in: show all points
+    return 1;
+  }
+
   function redrawMap() {
     if (!state.map || state.data.filtered.length === 0) return;
 
-    // Clear existing layers
     state.layers.points.clearLayers();
     state.layers.lines.clearLayers();
     if (state.layers.heatmap) {
@@ -3205,7 +2776,6 @@
     const altitudeEnabled = getSetting('altitudeEnabled', false);
     const altitudeLinesEnabled = getSetting('altitudeLinesEnabled', false);
 
-    // Get display settings
     const pointColor = getSetting('pointColor', '#3388ff');
     const lineColor = getSetting('lineColor', '#3388ff');
 
@@ -3215,7 +2785,6 @@
     const lineOpacity = getSetting('lineOpacity', 0.7);
     const smoothLines = getSetting('smoothLines', false);
 
-    // Altitude settings with separate colors for points and lines
     const altMin = getSetting('altitudeMin', 0);
     const altMax = getSetting('altitudeMax', 1000);
     const altPointsLowColor = getSetting('altitudePointsLowColor', '#00ff00');
@@ -3225,49 +2794,16 @@
 
     // Calculate smart sample rate considering both zoom level and point count
     const totalPoints = state.data.filtered.length;
-    const zoom = state.map.getZoom();
-    const dynamicVisibilityEnabled = getSetting('dynamicPointVisibility', true);
+    const pointSampleRate = getPointSampleRate();
 
-    // Target number of points to render for optimal performance
-    const targetPoints = 3000; // Aim for ~3000 visible points
-
-    let pointSampleRate = 1;
+    // Lines sample less aggressively - cheaper to render, and route
+    // continuity matters even when points are sampled
     let lineSampleRate = 1;
-
-    if (dynamicVisibilityEnabled && totalPoints > 2000) {
-      // Calculate sample rate based on both zoom and total points
-      // Higher zoom = more detail, Lower zoom = more aggressive sampling
-      const zoomFactor = Math.max(0.05, (zoom - 2) / 14); // 0.05 to 1.0 based on zoom
-      const densityFactor = Math.max(0.1, targetPoints / totalPoints); // Reduce if many points
-
-      // Combine factors: multiply so zoom level still matters for large datasets
-      // This allows showing progressively more points as you zoom in
-      const combinedFactor = zoomFactor * densityFactor;
-
-      // Calculate sample rate with logarithmic scaling for smoother transitions
-      // Much smaller thresholds now since we're multiplying factors
-      if (combinedFactor < 0.01) {
-        // Very zoomed out: aggressive sampling (1/20 to 1/50 of points)
-        pointSampleRate = Math.max(10, Math.min(50, Math.ceil(100 * combinedFactor / 2)));
-      } else if (combinedFactor < 0.05) {
-        // Zoomed out: moderate sampling
-        pointSampleRate = Math.max(5, Math.min(20, Math.ceil(1 / combinedFactor / 2)));
-      } else if (combinedFactor < 0.15) {
-        // Mid zoom: light sampling
-        pointSampleRate = Math.max(2, Math.min(10, Math.ceil(1 / combinedFactor / 3)));
-      } else {
-        // Zoomed in: show all points
-        pointSampleRate = 1;
-      }
-
-      // Lines use less aggressive sampling - they're cheaper to render
-      // and we want to maintain route continuity even when points are sampled
+    if (getSetting('dynamicPointVisibility', true) && totalPoints > 20000) {
       if (totalPoints > 50000) {
         lineSampleRate = Math.max(2, Math.min(pointSampleRate / 2, 5));
-      } else if (totalPoints > 20000) {
-        lineSampleRate = Math.max(2, Math.min(pointSampleRate / 3, 3));
       } else {
-        lineSampleRate = 1;
+        lineSampleRate = Math.max(2, Math.min(pointSampleRate / 3, 3));
       }
     }
 
@@ -3292,11 +2828,9 @@
           opacity: pointOpacity
         });
 
-        // Add popup
         const popupContent = createPopupContent(point);
         marker.bindPopup(popupContent);
 
-        // Skip tooltips and hitboxes for performance - popup on click is sufficient
         state.layers.points.addLayer(marker);
       });
     }
@@ -3352,12 +2886,10 @@
 
       // Dynamic radius and blur based on zoom level
       const zoom = state.map.getZoom();
-      const baseRadius = getSetting('heatmapRadius', getHeatmapSetting('radius'));
-      const baseBlur = getSetting('heatmapBlur', getHeatmapSetting('blur'));
+      const baseRadius = getSetting('heatmapRadius', 25);
+      const baseBlur = getSetting('heatmapBlur', 15);
 
-      // Adjust radius and blur based on zoom for better visualization
-      // At higher zoom (closer), use smaller radius for more detail
-      // At lower zoom (farther), use larger radius for better coverage
+      // Adjust radius/blur by zoom: more detail when close, more coverage when far
       let zoomAdjustedRadius = baseRadius;
       let zoomAdjustedBlur = baseBlur;
 
@@ -3374,7 +2906,7 @@
       state.layers.heatmap = L.heatLayer(heatmapData, {
         radius: zoomAdjustedRadius,
         blur: zoomAdjustedBlur,
-        minOpacity: getSetting('heatmapMinOpacity', getHeatmapSetting('minOpacity')),
+        minOpacity: getSetting('heatmapMinOpacity', 0.05),
         maxZoom: getSetting('heatmapMaxZoom', 18), // Limit max zoom for heatmap performance
         gradient: buildHeatmapGradient(
           getSetting('heatmapLowColor', '#0000ff'),
@@ -3485,27 +3017,6 @@
     return content;
   }
 
-  function createTooltipContent(point) {
-    const date = new Date(point.tst * 1000);
-
-    // Format time nicely
-    const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const dateStr = date.toLocaleDateString([], { month: 'short', day: 'numeric' });
-
-    let content = `<div style="text-align: center;">`;
-    content += `<div style="font-weight: 600;">${timeStr}</div>`;
-    content += `<div style="font-size: 11px; opacity: 0.8;">${dateStr}</div>`;
-
-    // Add altitude if available
-    if (point.alt !== undefined && point.alt !== null) {
-      content += `<div style="font-size: 11px; margin-top: 2px;">${point.alt}m</div>`;
-    }
-
-    content += `</div>`;
-
-    return content;
-  }
-
   function fitMapToBounds() {
     if (state.data.filtered.length === 0) return;
 
@@ -3513,8 +3024,7 @@
       state.data.filtered.map(p => [p.lat, p.lon])
     );
 
-    // Adjust padding based on sidebar state
-    // When sidebar is open, add left padding equal to sidebar width to keep data visible
+    // When the sidebar is open, pad left by its width to keep data visible
     const sidebar = document.getElementById('sidebar');
     const sidebarOpen = sidebar && state.sidebarOpen;
     const basePadding = 40;
@@ -3524,8 +3034,8 @@
       leftPadding = sidebar.offsetWidth + 20; // Full sidebar width plus small buffer
     }
 
-    // Record the fitted view once the move settles (the timeout is a fallback
-    // for fits that change nothing, where Leaflet may not fire moveend at all)
+    // Record the fitted view once the move settles (timeout fallback:
+    // Leaflet may not fire moveend if the fit changes nothing)
     let fitSaved = false;
     const saveFittedPosition = () => {
       if (!fitSaved) {
@@ -3552,34 +3062,13 @@
     const clickPoint = e.containerPoint; // Pixel coordinates
     const threshold = 15; // pixels - click radius
 
-    // Find nearest point within threshold
+    // Find nearest point within threshold, checking only the points that
+    // are actually drawn (same sampling as redrawMap)
+    const pointSampleRate = getPointSampleRate();
     let nearestPoint = null;
     let minDistance = Infinity;
 
-    // Only check visible points (sampled based on current settings)
-    const totalPoints = state.data.filtered.length;
-    const zoom = state.map.getZoom();
-    const dynamicVisibilityEnabled = getSetting('dynamicPointVisibility', true);
-
-    // Use same sampling logic as redrawMap
-    let pointSampleRate = 1;
-    if (dynamicVisibilityEnabled && totalPoints > 2000) {
-      const targetPoints = 3000;
-      const zoomFactor = Math.max(0.05, (zoom - 2) / 14);
-      const densityFactor = Math.max(0.1, targetPoints / totalPoints);
-      const combinedFactor = zoomFactor * densityFactor;
-
-      if (combinedFactor < 0.01) {
-        pointSampleRate = Math.max(10, Math.min(50, Math.ceil(100 * combinedFactor / 2)));
-      } else if (combinedFactor < 0.05) {
-        pointSampleRate = Math.max(5, Math.min(20, Math.ceil(1 / combinedFactor / 2)));
-      } else if (combinedFactor < 0.15) {
-        pointSampleRate = Math.max(2, Math.min(10, Math.ceil(1 / combinedFactor / 3)));
-      }
-    }
-
-    // Check sampled points
-    for (let i = 0; i < totalPoints; i += pointSampleRate) {
+    for (let i = 0; i < state.data.filtered.length; i += pointSampleRate) {
       const point = state.data.filtered[i];
       const layerPoint = state.map.latLngToContainerPoint([point.lat, point.lon]);
       const distance = Math.sqrt(
@@ -3607,7 +3096,6 @@
   // ============================================================================
 
   function showLoading(text, detail = '') {
-    state.isLoading = true;
     document.getElementById('loadingText').textContent = text;
     document.getElementById('loadingDetail').textContent = detail;
     document.getElementById('loadingError').style.display = 'none';
@@ -3615,7 +3103,6 @@
     document.getElementById('loadingTimer').textContent = 'Time: 0:00';
     document.getElementById('loadingOverlay').classList.add('visible');
 
-    // Start the timer
     state.loadingStartTime = Date.now();
     state.loadingTimerInterval = setInterval(updateLoadingTimer, 1000);
   }
@@ -3631,9 +3118,6 @@
   }
 
   function hideLoading() {
-    state.isLoading = false;
-
-    // Stop the timer
     if (state.loadingTimerInterval) {
       clearInterval(state.loadingTimerInterval);
       state.loadingTimerInterval = null;
@@ -3661,8 +3145,7 @@
     el.classList.toggle('error', isError);
   }
 
-  // Clear a stale error before a new API attempt; other status messages
-  // (e.g. cache warnings) are left alone
+  // Clear a stale error before a new API attempt; other statuses are kept
   function clearHeaderError() {
     const el = document.getElementById('headerStatus');
     if (el.classList.contains('error')) {
@@ -3695,36 +3178,15 @@
   function updateViewportStats() {
     if (state.data.filtered.length === 0) return;
 
-    // Get the current sample rate that would be used (matching redrawMap logic)
-    const totalPoints = state.data.filtered.length;
-    const zoom = state.map.getZoom();
-    const dynamicVisibilityEnabled = getSetting('dynamicPointVisibility', true);
-
-    let pointSampleRate = 1;
-    if (dynamicVisibilityEnabled && totalPoints > 2000) {
-      const targetPoints = 3000;
-      const zoomFactor = Math.max(0.05, (zoom - 2) / 14);
-      const densityFactor = Math.max(0.1, targetPoints / totalPoints);
-      const combinedFactor = zoomFactor * densityFactor;
-
-      if (combinedFactor < 0.01) {
-        pointSampleRate = Math.max(10, Math.min(50, Math.ceil(100 * combinedFactor / 2)));
-      } else if (combinedFactor < 0.05) {
-        pointSampleRate = Math.max(5, Math.min(20, Math.ceil(1 / combinedFactor / 2)));
-      } else if (combinedFactor < 0.15) {
-        pointSampleRate = Math.max(2, Math.min(10, Math.ceil(1 / combinedFactor / 3)));
-      }
-    }
-
-    // Get sampled points and count those in viewport
+    // Count the sampled points (matching redrawMap's sampling) in viewport
+    const pointSampleRate = getPointSampleRate();
     const sampledPoints = state.data.filtered.filter((_, i) => i % pointSampleRate === 0);
     const visibleInViewport = countPointsInViewport(sampledPoints);
     document.getElementById('statVisible').textContent = visibleInViewport.toLocaleString();
   }
 
-  // Calculate storage usage: the cache bytes for the given user/device
-  // selection plus the grand total (localStorage settings + all IndexedDB
-  // cache data combined)
+  // Cache bytes for the given selection plus the grand total (settings +
+  // all cache data)
   async function calculateStorageUsage(user, device) {
     // Calculate localStorage usage (settings only)
     let localStorageBytes = 0;
@@ -3760,8 +3222,8 @@
     const storageEnabled = getSetting('storageEnabled', true);
     const user = document.getElementById('userSelect').value;
     const device = document.getElementById('deviceSelect').value;
-    // Refresh button and per-combo cache text only make sense for a single
-    // specific user/device selection (not "All Users"/"All Devices")
+    // Refresh button and cache text only make sense for a single
+    // user/device selection
     const singleSelection = user && device && user !== ALL_SELECTOR && device !== ALL_SELECTOR;
 
     let hasCachedData = false;
@@ -3778,10 +3240,8 @@
 
       requestedCount = requestedDays.length;
 
-      // Count how many requested days are cached
       cachedCount = requestedDays.filter(day => cachedDays.has(day)).length;
 
-      // Check if any requested days are cached
       hasCachedData = cachedCount > 0;
     }
 
@@ -3789,7 +3249,6 @@
 
     document.getElementById('refreshBtn').style.display = showRefresh ? 'block' : 'none';
 
-    // Update button text based on cache state
     if (showRefresh) {
       if (cachedCount === requestedCount) {
         document.getElementById('loadDataBtn').textContent = 'Load Data (all cached)';
@@ -3863,8 +3322,6 @@
       // Always fetch the complete day range from midnight to just before midnight
       const rangeFrom = new Date(fromDate + 'T00:00:00');
       const rangeTo = new Date(toDate + 'T23:59:59');
-      const fromStr = formatDateForAPI(rangeFrom, 'start');
-      const toStr = formatDateForAPI(rangeTo, 'end');
 
       const multi = combos.length > 1;
 
@@ -3877,25 +3334,9 @@
           'This may take several minutes for large date ranges.'
         );
 
-        log(`[Refresh Debug] Full refresh: ${fromStr} to ${toStr} (${requestedDays.length} days) for ${label}`);
+        log(`[Refresh Debug] Full refresh: ${fromDate} to ${toDate} (${requestedDays.length} days) for ${label}`);
 
-        const locationsUrl = `${window.CONFIG.api.url}/api/0/locations?` +
-          `from=${encodeURIComponent(fromStr)}&` +
-          `to=${encodeURIComponent(toStr)}&` +
-          `user=${encodeURIComponent(user)}&` +
-          `device=${encodeURIComponent(device)}&` +
-          `format=json`;
-
-        const response = await fetchWithTimeout(locationsUrl, {
-          headers: buildAuthHeaders()
-        });
-
-        if (!response.ok) {
-          throw new Error(`Failed to fetch locations: ${response.status}`);
-        }
-
-        const result = await response.json();
-        const comboData = result.data || [];
+        const comboData = await fetchLocations(user, device, rangeFrom, rangeTo);
 
         // Cache the data by day if storage is enabled
         if (storageEnabled && comboData.length > 0) {
@@ -3905,7 +3346,6 @@
         }
       }
 
-      // Now load and display the data
       await loadData();
 
     } catch (error) {
@@ -3916,11 +3356,6 @@
         showError('Failed to load locations: ' + error.message);
       }, 3000);
     }
-  }
-
-  function updateDataSourceIndicator(fromCache = false) {
-    const statusEl = document.getElementById('headerStatus');
-    statusEl.textContent = '';
   }
 
   // ============================================================================

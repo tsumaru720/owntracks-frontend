@@ -104,8 +104,6 @@ It is recommended to view this document directly as the table is too wide for th
 | `APP_API_COOKIEVALUE` | `api.cookieValue` | Cookie value | No | — |
 | `APP_API_TIMEOUT` | `api.timeout` | Request timeout (milliseconds) | No | `600000` |
 | `APP_MAP_TILESERVER` | `map.tileServer` | Map tile server URL template | No | `https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png` |
-| `APP_MAP_DEFAULTCENTER` | `map.defaultCenter` | Default map center as `[lat, lng]` | No | `[51.50138, -0.14189]` |
-| `APP_MAP_DEFAULTZOOM` | `map.defaultZoom` | Default map zoom level | No | `13` |
 | `APP_MAP_MINZOOM` | `map.minZoom` | Minimum zoom level | No | `2` |
 | `APP_MAP_MAXZOOM` | `map.maxZoom` | Maximum zoom level | No | `21` |
 | `APP_DEFAULTS_USER` | `defaults.user` | Default username to select | No | — |
@@ -156,10 +154,6 @@ It is recommended to view this document directly as the table is too wide for th
     "username": "user",
     "password": "pass"
   },
-  "map": {
-    "defaultCenter": [51.50138, -0.14189],
-    "defaultZoom": 13
-  },
   "defaults": {
     "user": "john"
   },
@@ -179,8 +173,6 @@ services:
       APP_API_URL: https://recorder.example.org
       APP_API_USERNAME: user
       APP_API_PASSWORD: pass
-      APP_MAP_DEFAULTCENTER: "[51.50138,-0.14189]"
-      APP_MAP_DEFAULTZOOM: "13"
       APP_DEFAULTS_USER: john
       APP_DEBUG_CONSOLELOGGING: "false"
       SERVER_LOG_LEVEL: "info"
@@ -203,7 +195,7 @@ services:
 
 ### Points
 - Customize color/size/opacity (visibility via the quick actions dock)
-- Hover tooltips show time, date, altitude
+- Click a point for a detail popup (time, position, altitude, accuracy, battery)
 
 ### Lines
 - Customize color/width/opacity (visibility via the quick actions dock)

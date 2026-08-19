@@ -26,8 +26,6 @@ jq -n '
     "APP_API_TIMEOUT": ["api", "timeout"],
 
     "APP_MAP_TILESERVER": ["map", "tileServer"],
-    "APP_MAP_DEFAULTCENTER": ["map", "defaultCenter"],
-    "APP_MAP_DEFAULTZOOM": ["map", "defaultZoom"],
     "APP_MAP_MINZOOM": ["map", "minZoom"],
     "APP_MAP_MAXZOOM": ["map", "maxZoom"],
 
