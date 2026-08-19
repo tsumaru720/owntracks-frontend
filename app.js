@@ -2004,7 +2004,7 @@
       showLoadingError('Failed to load users: ' + error.message);
       setTimeout(() => {
         hideLoading();
-        updateHeaderStatus('Failed to load users: ' + error.message, true);
+        showError('Failed to load users: ' + error.message);
       }, 3000);
     }
   }
@@ -2160,7 +2160,7 @@
       showLoadingError('Failed to load devices: ' + error.message);
       setTimeout(() => {
         hideLoading();
-        updateHeaderStatus('Failed to load devices: ' + error.message, true);
+        showError('Failed to load devices: ' + error.message);
       }, 3000);
     }
   }
@@ -2482,7 +2482,7 @@
       setTimeout(() => {
         hideLoading();
         clearMapData();
-        updateHeaderStatus('Failed to load locations: ' + error.message, true);
+        showError('Failed to load locations: ' + error.message);
       }, 3000);
     }
   }
@@ -2774,10 +2774,13 @@
       });
     },
 
-    // Calculate storage usage for IndexedDB
-    async getStorageUsage() {
+    // Calculate storage usage for IndexedDB. Returns the bytes used by the
+    // given user/device (selection) alongside the total across all
+    // users/devices; omit user/device to count everything as the selection
+    async getStorageUsage(user, device) {
       const db = await this.open();
       return new Promise((resolve, reject) => {
+        let selectionBytes = 0;
         let totalBytes = 0;
 
         const tx = db.transaction([STORE_CACHE], 'readonly');
@@ -2791,12 +2794,17 @@
             // Estimate size: data buffer size + metadata
             if (value.data instanceof Uint8Array) {
               totalBytes += value.data.byteLength;
+
+              if (user !== undefined && value.user === user &&
+                  (device === undefined || value.device === device)) {
+                selectionBytes += value.data.byteLength;
+              }
             }
             cursor.continue();
           }
         };
 
-        tx.oncomplete = () => resolve(totalBytes);
+        tx.oncomplete = () => resolve({ selection: selectionBytes, total: totalBytes });
         tx.onerror = () => reject(tx.error);
       });
     }
@@ -3487,7 +3495,7 @@
   }
 
   function showError(message) {
-    alert('Error: ' + message);
+    updateHeaderStatus(message, true);
     console.error(message);
   }
 
@@ -3558,8 +3566,10 @@
     document.getElementById('statVisible').textContent = visibleInViewport.toLocaleString();
   }
 
-  // Calculate storage usage for IndexedDB cache
-  async function calculateStorageUsage() {
+  // Calculate storage usage: the cache bytes for the given user/device
+  // selection plus the grand total (localStorage settings + all IndexedDB
+  // cache data combined)
+  async function calculateStorageUsage(user, device) {
     // Calculate localStorage usage (settings only)
     let localStorageBytes = 0;
     for (let i = 0; i < localStorage.length; i++) {
@@ -3570,23 +3580,23 @@
       }
     }
 
-    // Calculate IndexedDB cache usage
-    let cacheBytes = 0;
+    // Calculate IndexedDB cache usage (selection + total in one pass)
+    let cache = { selection: 0, total: 0 };
     try {
-      cacheBytes = await idbHelper.getStorageUsage();
+      cache = await idbHelper.getStorageUsage(user, device);
     } catch (e) {
       logWarn('Failed to calculate IndexedDB usage:', e);
     }
 
-    return { total: localStorageBytes + cacheBytes, cache: cacheBytes };
+    return { selection: cache.selection, total: localStorageBytes + cache.total };
   }
 
   // Format bytes as human-readable string
   function formatBytes(bytes) {
     if (bytes === 0) return '0 B';
     const k = 1024;
-    const sizes = ['B', 'KB', 'MB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), sizes.length - 1);
     return (bytes / Math.pow(k, i)).toFixed(1).replace('.0', '') + ' ' + sizes[i];
   }
 
@@ -3635,18 +3645,30 @@
       document.getElementById('loadDataBtn').textContent = 'Load Data';
     }
 
-    // Update cache status text with storage usage
+    // Update cache status text and progress bar with storage usage
     const cacheStatusEl = document.getElementById('cacheStatus');
+    let usage = null;
+    let statusText = null;
+
     if (storageEnabled && singleSelection) {
-      cacheStatusEl.style.display = 'block';
-      const usage = await calculateStorageUsage();
-      document.getElementById('cacheStatusText').textContent =
-        `Cache: ${cachedDays.size} day${cachedDays.size === 1 ? '' : 's'} stored for ${user}/${device} (${formatBytes(usage.cache)} used)`;
+      usage = await calculateStorageUsage(user, device);
+      statusText = `Cache: ${cachedDays.size} day${cachedDays.size === 1 ? '' : 's'} stored for ${user}/${device} (${formatBytes(usage.selection)} / ${formatBytes(usage.total)} used)`;
+    } else if (storageEnabled && user && user !== ALL_SELECTOR) {
+      // All Devices for one user: selection bytes = every device of that user
+      usage = await calculateStorageUsage(user);
+      statusText = `Cache: enabled (${formatBytes(usage.selection)} / ${formatBytes(usage.total)} used)`;
     } else if (storageEnabled) {
+      // All Users: the selection is everything, so only the total is shown
+      usage = await calculateStorageUsage();
+      statusText = `Cache: enabled (${formatBytes(usage.total)} used)`;
+    }
+
+    if (usage) {
       cacheStatusEl.style.display = 'block';
-      const usage = await calculateStorageUsage();
-      document.getElementById('cacheStatusText').textContent =
-        `Cache: enabled (${formatBytes(usage.cache)} used)`;
+      document.getElementById('cacheStatusText').textContent = statusText;
+      // Progress bar: share of total storage used by the current selection
+      const pct = usage.total > 0 ? Math.min(100, (usage.selection / usage.total) * 100) : 0;
+      document.getElementById('cacheProgressFill').style.width = `${pct.toFixed(1)}%`;
     } else {
       cacheStatusEl.style.display = 'none';
     }
@@ -3730,7 +3752,7 @@
       setTimeout(() => {
         hideLoading();
         clearMapData();
-        updateHeaderStatus('Failed to load locations: ' + error.message, true);
+        showError('Failed to load locations: ' + error.message);
       }, 3000);
     }
   }

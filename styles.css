@@ -863,6 +863,39 @@ body:not(.ui-ready) .sub-section-content {
   margin-top: 8px;
 }
 
+/* Cache status (debug section) */
+.cache-status {
+  margin-top: 25px;
+  padding-top: 15px;
+  border-top: 1px solid var(--border-light);
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.dark-mode .cache-status {
+  border-top-color: var(--border-dark);
+}
+
+.cache-progress {
+  margin-top: 6px;
+  height: 6px;
+  border-radius: 3px;
+  background-color: #e9ecef;
+  overflow: hidden;
+}
+
+.dark-mode .cache-progress {
+  background-color: #333;
+}
+
+.cache-progress-fill {
+  height: 100%;
+  width: 0%;
+  background-color: var(--accent);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
 .quick-range {
   flex: 0 0 auto;
   background-color: #6c757d;
