@@ -443,6 +443,10 @@
     </button>
   </div>
 
+  <!-- Floating help button - bottom-left corner, rides along with the
+       sidebar like the quick actions dock -->
+  <button class="help-fab" id="helpFab" title="Keyboard Shortcuts (?)" aria-label="Show keyboard shortcuts" aria-haspopup="dialog" aria-expanded="false">?</button>
+
   <!-- Custom date picker popup -->
   <div id="customDatePicker" class="custom-date-picker" style="display: none;">
     <div class="date-picker-header">
@@ -472,6 +476,42 @@
     <div class="loading-detail" id="loadingDetail"></div>
     <div class="loading-timer" id="loadingTimer" style="display: none;"></div>
     <div class="loading-error" id="loadingError" style="display: none;"></div>
+  </div>
+
+  <!-- Keyboard Shortcuts Help Overlay -->
+  <div class="help-overlay" id="helpOverlay" role="dialog" aria-modal="true" aria-labelledby="helpOverlayTitle" aria-hidden="true" tabindex="-1">
+    <div class="help-panel">
+      <div class="help-header">
+        <h2 id="helpOverlayTitle">Keyboard Shortcuts</h2>
+        <button type="button" class="help-close-btn" id="helpCloseBtn" aria-label="Close keyboard shortcuts">✕</button>
+      </div>
+      <ul class="help-keybinds">
+        <li>
+          <span class="help-keys"><kbd>?</kbd><kbd>Esc</kbd></span>
+          <span class="help-desc">Close this help</span>
+        </li>
+        <li>
+          <span class="help-keys"><kbd>H</kbd></span>
+          <span class="help-desc">Toggle heatmap</span>
+        </li>
+        <li>
+          <span class="help-keys"><kbd>P</kbd></span>
+          <span class="help-desc">Toggle points</span>
+        </li>
+        <li>
+          <span class="help-keys"><kbd>L</kbd></span>
+          <span class="help-desc">Toggle lines</span>
+        </li>
+        <li>
+          <span class="help-keys"><kbd>F</kbd></span>
+          <span class="help-desc">Fit map to data</span>
+        </li>
+        <li>
+          <span class="help-keys"><kbd>D</kbd></span>
+          <span class="help-desc">Toggle dynamic point visibility <span class="help-temp-badge">temporary</span></span>
+        </li>
+      </ul>
+    </div>
   </div>
 
   <!-- Map -->

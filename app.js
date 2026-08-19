@@ -844,6 +844,15 @@
     document.getElementById('qaLines').addEventListener('click', () => toggleDisplaySetting('showLines', true));
     document.getElementById('qaHeatmap').addEventListener('click', () => toggleDisplaySetting('heatmapEnabled', false));
 
+    // Keyboard shortcuts + help overlay
+    document.addEventListener('keydown', handleShortcutKey);
+    document.getElementById('helpFab').addEventListener('click', openHelpOverlay);
+    document.getElementById('helpCloseBtn').addEventListener('click', closeHelpOverlay);
+    // Clicking the translucent backdrop (outside the panel) also closes
+    document.getElementById('helpOverlay').addEventListener('click', (e) => {
+      if (e.target === e.currentTarget) closeHelpOverlay();
+    });
+
     // Auto-fit to bounds
     document.getElementById('autoFitToBounds').addEventListener('change', (e) => {
       saveSetting('autoFitToBounds', e.target.checked, true);
@@ -1308,6 +1317,104 @@
     document.getElementById('qaLines').setAttribute('aria-pressed', lines);
     document.getElementById('qaHeatmap').classList.toggle('active', heatmap);
     document.getElementById('qaHeatmap').setAttribute('aria-pressed', heatmap);
+  }
+
+  // ============================================================================
+  // Keyboard Shortcuts & Help Overlay
+  // ============================================================================
+
+  // Element focused before the help overlay opened, restored when it closes
+  let helpOverlayReturnFocus = null;
+
+  function openHelpOverlay() {
+    const overlay = document.getElementById('helpOverlay');
+    if (overlay.classList.contains('visible')) return;
+    helpOverlayReturnFocus = document.activeElement;
+    overlay.classList.add('visible');
+    overlay.setAttribute('aria-hidden', 'false');
+    document.getElementById('helpFab')?.setAttribute('aria-expanded', 'true');
+    // Move focus into the overlay so keyboard input (including Leaflet's map
+    // navigation keys on a focused map container) no longer reaches the app
+    // underneath while the overlay is open
+    overlay.focus();
+  }
+
+  function closeHelpOverlay() {
+    const overlay = document.getElementById('helpOverlay');
+    if (!overlay.classList.contains('visible')) return;
+    overlay.classList.remove('visible');
+    overlay.setAttribute('aria-hidden', 'true');
+    document.getElementById('helpFab')?.setAttribute('aria-expanded', 'false');
+    if (helpOverlayReturnFocus && typeof helpOverlayReturnFocus.focus === 'function') {
+      helpOverlayReturnFocus.focus();
+    }
+    helpOverlayReturnFocus = null;
+  }
+
+  // Keyboard counterpart of the dynamicPointVisibility checkbox change handler
+  function toggleDynamicPointVisibility() {
+    const next = !getSetting('dynamicPointVisibility', true);
+    saveSetting('dynamicPointVisibility', next, true);
+    document.getElementById('dynamicPointVisibility').checked = next;
+    redrawMap();
+  }
+
+  function handleShortcutKey(e) {
+    // Never intercept browser/OS combos like Ctrl+L or Cmd+P
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+    const overlay = document.getElementById('helpOverlay');
+
+    // While the help overlay is open it captures all keyboard input: only
+    // ? and Escape dismiss it and Tab is trapped inside, so no keys reach
+    // the app underneath
+    if (overlay.classList.contains('visible')) {
+      if (e.key === 'Escape' || e.key === '?') {
+        e.preventDefault();
+        closeHelpOverlay();
+      } else if (e.key === 'Tab') {
+        e.preventDefault();
+        overlay.querySelector('.help-close-btn').focus();
+      }
+      return;
+    }
+
+    // Don't fire shortcuts while the user is typing in a form control
+    if (e.target instanceof Element && e.target.closest('input, select, textarea, [contenteditable="true"]')) {
+      return;
+    }
+
+    switch (e.key) {
+      case '?':
+        e.preventDefault();
+        openHelpOverlay();
+        break;
+      case 'h':
+      case 'H':
+        e.preventDefault();
+        toggleDisplaySetting('heatmapEnabled', false);
+        break;
+      case 'p':
+      case 'P':
+        e.preventDefault();
+        toggleDisplaySetting('showPoints', true);
+        break;
+      case 'l':
+      case 'L':
+        e.preventDefault();
+        toggleDisplaySetting('showLines', true);
+        break;
+      case 'f':
+      case 'F':
+        e.preventDefault();
+        if (state.data.filtered.length > 0) fitMapToBounds();
+        break;
+      case 'd':
+      case 'D':
+        e.preventDefault();
+        toggleDynamicPointVisibility();
+        break;
+    }
   }
 
   function toggleSidebar() {
