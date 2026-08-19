@@ -3310,14 +3310,20 @@
     }
     const bounds = L.latLngBounds([minLat, minLng], [maxLat, maxLng]);
 
-    // When the sidebar is open, pad left by its width to keep data visible
+    // Left padding keeps the fitted bounds clear of the quick-actions
+    // dock: it sits 10px off the screen edge (or the sidebar's right edge
+    // when open) and is offsetWidth wide. Measured rather than read from
+    // getBoundingClientRect because the dock's `left` is still mid-flight
+    // when the post-toggle refit runs; offsetWidth is transition-stable.
     const sidebar = document.getElementById('sidebar');
     const sidebarOpen = sidebar && state.sidebarOpen;
     const basePadding = 40;
+    const dock = document.getElementById('quickActions');
+    const dockClearance = 10 + (dock ? dock.offsetWidth : 65) + 10;
 
-    let leftPadding = basePadding;
+    let leftPadding = dockClearance;
     if (sidebarOpen && sidebar) {
-      leftPadding = sidebar.offsetWidth + 20; // Full sidebar width plus small buffer
+      leftPadding = sidebar.offsetWidth + dockClearance;
     }
 
     // Record the fitted view once the move settles (timeout fallback:
