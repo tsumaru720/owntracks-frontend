@@ -2260,19 +2260,20 @@
       // Show recenter button when we have data
       document.getElementById('recenterBtn').style.display = 'block';
 
-      // Update time range
-      state.data.timeRange = {
-        start: Math.min(...state.data.raw.map(p => p.tst)),
-        end: Math.max(...state.data.raw.map(p => p.tst))
-      };
-
-      // Calculate max accuracy
+      // Single pass over all points for time range and max accuracy.
+      // (Deliberately not Math.min(...spread) - spreading a large array
+      // exceeds the argument limit and throws "Maximum call stack size exceeded")
+      let tstMin = Infinity;
+      let tstMax = -Infinity;
       state.data.maxAccuracy = 0;
       state.data.raw.forEach(point => {
+        if (point.tst < tstMin) tstMin = point.tst;
+        if (point.tst > tstMax) tstMax = point.tst;
         if (point.acc && point.acc > state.data.maxAccuracy) {
           state.data.maxAccuracy = point.acc;
         }
       });
+      state.data.timeRange = { start: tstMin, end: tstMax };
 
       // Update accuracy slider max
       const sliderMax = Math.max(500, Math.ceil(state.data.maxAccuracy / 10) * 10);
@@ -2452,7 +2453,10 @@
       for (const day of days) {
         const dayData = await this.getDayData(user, device, day);
         if (dayData) {
-          results.push(...dayData);
+          // Loop rather than push(...spread) - a large spread exceeds the argument limit
+          for (const point of dayData) {
+            results.push(point);
+          }
         }
       }
 
@@ -2521,7 +2525,13 @@
     async getLatestCachedTimestamp(user, device, days) {
       const data = await this.getCachedData(user, device, days);
       if (!data.length) return null;
-      return Math.max(...data.map(point => Number(point.tst) || 0));
+      // Loop rather than Math.max(...spread) - a large spread exceeds the argument limit
+      let latest = 0;
+      for (const point of data) {
+        const tst = Number(point.tst) || 0;
+        if (tst > latest) latest = tst;
+      }
+      return latest;
     },
 
     // Clear all cache data for all users/devices
