@@ -1163,7 +1163,13 @@
   // Dock-driven display toggles, persisted with a null default so an
   // explicit toggle always wins over config-file values
   function toggleDisplaySetting(key, defaultValue) {
-    saveSetting(key, !getSetting(key, defaultValue), null);
+    const newValue = !getSetting(key, defaultValue);
+    saveSetting(key, newValue, null);
+    // A proximity popup describes a point; don't leave it dangling over
+    // the map once the points are hidden
+    if (key === 'showPoints' && !newValue && state.map) {
+      state.map.closePopup();
+    }
     redrawMap();
     updateQuickActionsBar();
   }
@@ -1509,6 +1515,39 @@
           setTimeout(remeasureParent, 300);
         }
       });
+    });
+
+    // Section max-heights are measured on demand (scrollHeight), so any
+    // content that grows after measurement - cache status text wrapping to
+    // another line, a longer Load Data label - stays clipped by the stale
+    // cap unless something re-measures. Watching each section's children
+    // (rather than the section itself) catches those growths as they
+    // happen, and never fires for the collapse/expand animations, which
+    // resize the section without moving its children.
+    const unclipSectionContent = (content, controller) => {
+      if (!content || !controller || controller.classList.contains('collapsed')) return;
+      const cap = parseFloat(content.style.maxHeight);
+      if (Number.isNaN(cap) || content.scrollHeight <= cap) return;
+
+      content.style.transition = 'none';
+      content.style.maxHeight = 'none';
+      void content.offsetHeight;
+      const height = content.scrollHeight;
+      content.style.transition = '';
+      if (height > 0) content.style.maxHeight = `${height}px`;
+    };
+
+    const contentResizeObserver = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        const content = entry.target.parentElement;
+        if (!content || !content.classList.contains('section-content') &&
+            !content.classList.contains('sub-section-content')) continue;
+        unclipSectionContent(content, content.previousElementSibling);
+      }
+    });
+
+    document.querySelectorAll('.section-content, .sub-section-content').forEach(content => {
+      Array.from(content.children).forEach(child => contentResizeObserver.observe(child));
     });
 
     // One shared resize handler instead of one listener per toggle
@@ -3518,9 +3557,11 @@
     return projectedPointCache;
   }
 
-  // Proximity click handler - makes it easier to click on small points
+  // Proximity click handler - makes it easier to click on small points.
+  // Only fires for visible points: with the point layer hidden there's
+  // nothing on the map to aim at, so clicks must fall through.
   function handleProximityClick(e) {
-    if (state.data.filtered.length === 0) return;
+    if (!getSetting('showPoints', true) || state.data.filtered.length === 0) return;
 
     const threshold = 15; // pixels - click radius
     const thresholdSq = threshold * threshold;

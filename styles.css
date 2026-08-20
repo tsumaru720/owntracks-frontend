@@ -382,9 +382,11 @@ body.dark-mode {
   box-sizing: border-box;
 }
 
-/* Indent content to align with section text, not icon - but not for stats */
+/* Indent content to align with section text, not icon - but not for stats.
+   The matching right margin keeps the inset equal on both sides */
 .sidebar-section:not([data-section="stats"]) > .section-content {
   margin-left: 14px;
+  margin-right: 14px;
 }
 
 .light-mode .sidebar-section {
