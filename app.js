@@ -1273,6 +1273,11 @@
         e.preventDefault();
         toggleDisplaySetting('showLines', true);
         break;
+      case 'm':
+      case 'M':
+        e.preventDefault();
+        toggleSatelliteView();
+        break;
       case 'f':
       case 'F':
         e.preventDefault();

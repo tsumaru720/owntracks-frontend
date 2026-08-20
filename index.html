@@ -555,7 +555,19 @@
   </div>
 
   <!-- Floating help button - rides along with the sidebar like the dock -->
-  <button class="help-fab" id="helpFab" title="Keyboard Shortcuts (?)" aria-label="Show keyboard shortcuts" aria-haspopup="dialog" aria-expanded="false">?</button>
+  <button class="help-fab" id="helpFab" title="Keyboard Shortcuts (?)" aria-label="Show keyboard shortcuts" aria-haspopup="dialog" aria-expanded="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="2" y="4" width="20" height="16" rx="2"></rect>
+      <path d="M6 8h.01"></path>
+      <path d="M10 8h.01"></path>
+      <path d="M14 8h.01"></path>
+      <path d="M18 8h.01"></path>
+      <path d="M8 12h.01"></path>
+      <path d="M12 12h.01"></path>
+      <path d="M16 12h.01"></path>
+      <path d="M7 16h10"></path>
+    </svg>
+  </button>
 
   <!-- Custom date picker popup -->
   <div id="customDatePicker" class="custom-date-picker" style="display: none;">
@@ -606,6 +618,10 @@
         <li>
           <span class="help-keys"><kbd>L</kbd></span>
           <span class="help-desc">Toggle lines</span>
+        </li>
+        <li>
+          <span class="help-keys"><kbd>M</kbd></span>
+          <span class="help-desc">Toggle satellite view</span>
         </li>
         <li>
           <span class="help-keys"><kbd>F</kbd></span>
