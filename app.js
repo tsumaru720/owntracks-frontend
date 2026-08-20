@@ -3714,9 +3714,15 @@
     const totalPoints = state.data.raw.length;
     const cached = state.data.sourceBreakdown?.cached || 0;
     const fresh = state.data.sourceBreakdown?.fresh || 0;
-    const sourceSuffix = cached || fresh ? ` (${cached.toLocaleString()} cached, ${fresh.toLocaleString()} fresh)` : '';
+    const sourceBreakdown = cached || fresh ? `(${cached.toLocaleString()} cached, ${fresh.toLocaleString()} fresh)` : '';
 
-    document.getElementById('statTotal').textContent = `${totalPoints.toLocaleString()}${sourceSuffix}`;
+    // Point count on its own line; cached/fresh breakdown wraps beneath it
+    const totalEl = document.getElementById('statTotal');
+    if (sourceBreakdown) {
+      totalEl.innerHTML = `${totalPoints.toLocaleString()}<br><span class="stat-breakdown">${sourceBreakdown}</span>`;
+    } else {
+      totalEl.textContent = totalPoints.toLocaleString();
+    }
     // Visible count is updated by redrawMap() and updateViewportStats() which account for viewport
 
     // Ranges span every loaded point for the selected period (all selected

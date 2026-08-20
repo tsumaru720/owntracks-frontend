@@ -488,7 +488,6 @@ body:not(.ui-ready) .sub-section-content {
 
 .sidebar-section[data-section="datasource"] > .section-content {
   padding-bottom: 15px;
-  min-height: fit-content;
 }
 
 /* Visual grouping of point/line/heatmap settings in Display Options */
@@ -1324,6 +1323,9 @@ body:not(.ui-ready) .sub-section-content {
 .stat-row {
   display: flex;
   justify-content: space-between;
+  /* Shared first-line baseline, so the label and its (possibly wrapped)
+     value sit on the same text line regardless of font metrics */
+  align-items: baseline;
   padding: 4px 0;
 }
 
@@ -1334,6 +1336,13 @@ body:not(.ui-ready) .sub-section-content {
 .stat-value {
   font-family: monospace;
   font-weight: 600;
+  text-align: right;
+}
+
+/* Secondary line under a stat value (cached/fresh breakdown) */
+.stat-breakdown {
+  font-weight: 400;
+  opacity: 0.7;
 }
 
 /* Dark Mode Map Filter */
