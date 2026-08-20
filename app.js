@@ -807,7 +807,7 @@
       updateDatePresetButtons();
       await updateRefreshButton();
     });
-    document.getElementById('loadDataBtn').addEventListener('click', loadData);
+    document.getElementById('loadDataBtn').addEventListener('click', () => loadData());
     document.getElementById('refreshBtn').addEventListener('click', loadDataFromAPI);
 
     // Floating quick actions dock
@@ -1880,6 +1880,12 @@
       // Populate the device dropdown for whichever user is now selected
       await updateDeviceSelect();
 
+      // Page load only: render the restored selection straight from the
+      // cache with no API traffic. Selection changes made later in the
+      // session deliberately skip this - they only refresh the Load Data
+      // button state instead of re-rendering the map.
+      await autoLoadFromCache();
+
       // Recalculate section heights after dropdowns are populated
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
@@ -2015,19 +2021,6 @@
 
         deviceSelect.value = deviceToSelect;
         // No saveSetting here: only explicit user changes are persisted
-
-        // Auto-load only a single user/device pair that already has cached
-        // data; all-selections wait for an explicit Load Data click
-        if (deviceToSelect && deviceToSelect !== ALL_SELECTOR) {
-          const storageEnabled = getSetting('storageEnabled', true);
-          if (storageEnabled) {
-            const cachedDays = await getCachedDays(user, deviceToSelect);
-            if (cachedDays.size > 0) {
-              await loadData();
-            }
-          }
-          // If storage is disabled, don't auto-load - wait for explicit user action
-        }
       }
 
       recalcHeights();
@@ -2040,6 +2033,40 @@
         showError('Failed to load devices: ' + error.message);
       }, 3000);
     }
+  }
+
+  // Page-load restore: if any combo of the current selection has cached
+  // days inside the requested date range, render that data straight from the
+  // cache - no API traffic. Uncached days and the current day's points
+  // stay blank until an explicit Load Data (which fetches the current day
+  // fresh and fills the gaps) or Refresh from API. Only runs once at page load;
+  // in-session selection changes just refresh the Load Data button state
+  // via updateRefreshButton.
+  async function autoLoadFromCache() {
+    if (!getSetting('storageEnabled', true)) {
+      await updateRefreshButton();
+      return;
+    }
+
+    const combos = await resolveSelectedCombos();
+    if (combos.length === 0) {
+      await updateRefreshButton();
+      return;
+    }
+
+    const { from, to } = getDateRange();
+    const requestedDays = getDaysInRange(formatDateForInput(from), formatDateForInput(to));
+
+    for (const { user, device } of combos) {
+      const cachedDays = await getCachedDays(user, device);
+      if (requestedDays.some(day => cachedDays.has(day))) {
+        await loadData({ cacheOnly: true });
+        return;
+      }
+    }
+
+    // Nothing cached for this selection - still refresh the buttons
+    await updateRefreshButton();
   }
 
   // Expand the current selection into the concrete user/device combos to
@@ -2108,50 +2135,29 @@
     return result.data || [];
   }
 
-  // Load one user/device combo: refresh today if the range includes it,
-  // then cached days, then API fetches for uncached ranges. `label` names
-  // the combo in the loading overlay; returns points + cached/fresh counts.
-  async function loadDataForCombo(user, device, fromDate, toDate, requestedDays, storageEnabled, label) {
+  // Load one user/device combo: cached days first, then API fetches for
+  // uncached ranges. `label` names the combo in the loading overlay;
+  // returns points + cached/fresh counts. `cacheOnly` (page-load
+  // auto-restore) serves purely from the cache - no API traffic; gaps and
+  // the current day wait for an explicit Load Data.
+  async function loadDataForCombo(user, device, fromDate, toDate, requestedDays, storageEnabled, label, cacheOnly = false) {
     let comboData = [];
     let cachedCount = 0;
     let freshCount = 0;
 
+    // The current day is never cached: it's incomplete by nature, and a
+    // partial-day key would stop the gap fill from ever completing it. It
+    // rides along as the trailing uncached day of every load while in
+    // range (fetched fresh, display-only) and gets cached complete from
+    // tomorrow onwards.
+    const todayKey = formatDateForInput(new Date());
+
     if (storageEnabled) {
-      // If the range includes today, refresh today's cache before reading
-      // it so newly recorded points are picked up
-      const todayKey = formatDateForInput(new Date());
-      let todayRefreshed = false;
-
-      if (requestedDays.includes(todayKey)) {
-        try {
-          showLoading(`Updating today's data for ${label}...`);
-          const todayFrom = new Date(todayKey + 'T00:00:00');
-          const todayTo = new Date(todayKey + 'T23:59:59');
-
-          log(`[Today Refresh] Fetching ${todayKey} for ${label}`);
-
-          const todayData = await fetchLocations(user, device, todayFrom, todayTo);
-          freshCount += todayData.length;
-
-          // Cache the full day (even when empty) so it isn't re-requested below
-          const dailyData = splitDataByDays(todayData, todayKey, todayKey);
-          await cacheDailyData(user, device, dailyData);
-
-          // Today is already counted as fresh - skip it when reading cache
-          todayRefreshed = true;
-          comboData = comboData.concat(todayData);
-        } catch (e) {
-          // Best-effort: fall back to whatever the cache holds for today
-          logWarn(`Failed to refresh today's data for ${label}:`, e.message);
-        }
-      }
-
       // Load cached days
       const cachedDays = await getCachedDays(user, device);
       log('Requested days:', requestedDays);
       log('Cached days:', Array.from(cachedDays));
-      const daysToLoad = requestedDays.filter(day =>
-        cachedDays.has(day) && !(todayRefreshed && day === todayKey));
+      const daysToLoad = requestedDays.filter(day => cachedDays.has(day));
       log('Days to load from cache:', daysToLoad);
 
       if (daysToLoad.length > 0) {
@@ -2162,43 +2168,55 @@
       }
     }
 
-    // Find uncached day ranges
-    const uncachedRanges = storageEnabled
-      ? await getUncachedDayRanges(user, device, requestedDays)
-      : [{ from: fromDate, to: toDate }];
+    // Find uncached day ranges (skipped in cache-only mode - gaps stay
+    // blank until an explicit Load Data / Refresh)
+    if (!cacheOnly) {
+      const uncachedRanges = storageEnabled
+        ? await getUncachedDayRanges(user, device, requestedDays)
+        : [{ from: fromDate, to: toDate }];
 
-    log('Uncached ranges:', uncachedRanges);
+      log('Uncached ranges:', uncachedRanges);
 
-    // Fetch uncached data
-    for (const range of uncachedRanges) {
-      const daysInThisRange = getDaysInRange(range.from, range.to);
-      showLoading(
-        `Fetching ${label} (${daysInThisRange.length} day${daysInThisRange.length > 1 ? 's' : ''} from API)...`,
-        'This may take several minutes for large date ranges.'
-      );
+      // Fetch uncached data
+      for (const range of uncachedRanges) {
+        const daysInThisRange = getDaysInRange(range.from, range.to);
+        showLoading(
+          `Fetching ${label} (${daysInThisRange.length} day${daysInThisRange.length > 1 ? 's' : ''} from API)...`,
+          'This may take several minutes for large date ranges.'
+        );
 
-      log(`[Date Debug] Requested local range: ${range.from} to ${range.to}`);
+        log(`[Date Debug] Requested local range: ${range.from} to ${range.to}`);
 
-      const rangeFrom = new Date(range.from + 'T00:00:00');
-      const rangeTo = new Date(range.to + 'T23:59:59');
-      const rangeData = await fetchLocations(user, device, rangeFrom, rangeTo);
+        const rangeFrom = new Date(range.from + 'T00:00:00');
+        const rangeTo = new Date(range.to + 'T23:59:59');
+        const rangeData = await fetchLocations(user, device, rangeFrom, rangeTo);
 
-      // Track fresh point count
-      freshCount += rangeData.length;
+        // Track fresh point count
+        freshCount += rangeData.length;
 
-      // Cache the data by day if storage is enabled
-      if (storageEnabled && rangeData.length > 0) {
-        const dailyData = splitDataByDays(rangeData, range.from, range.to);
-        await cacheDailyData(user, device, dailyData);
+        // Cache every day in the range, even when the fetch returned
+        // nothing - the day key's existence marks the range complete so
+        // it isn't re-requested; the cache status counts only days that
+        // actually hold points
+        if (storageEnabled) {
+          const dailyData = splitDataByDays(rangeData, range.from, range.to);
+          // Never persist the current day (see the note at the top of this
+          // function) - its points stay fresh-only until the day is over
+          delete dailyData[todayKey];
+          await cacheDailyData(user, device, dailyData);
+        }
+
+        comboData = comboData.concat(rangeData);
       }
-
-      comboData = comboData.concat(rangeData);
     }
 
     return { data: comboData, cachedCount, freshCount };
   }
 
-  async function loadData() {
+  // Options: { cacheOnly } - serve exclusively from the cache with no API
+  // traffic (page-load auto-restore). Takes an options object so a click
+  // event can't leak through as a truthy flag.
+  async function loadData({ cacheOnly = false } = {}) {
     clearHeaderError();
     const userSel = document.getElementById('userSelect').value;
     const deviceSel = document.getElementById('deviceSelect').value;
@@ -2234,7 +2252,7 @@
         const label = multi ? `${i + 1}/${combos.length} ${user}/${device}` : `${user}/${device}`;
 
         const comboResult = await loadDataForCombo(
-          user, device, fromDate, toDate, requestedDays, storageEnabled, label
+          user, device, fromDate, toDate, requestedDays, storageEnabled, label, cacheOnly
         );
 
         // Tag points with their source so tracks can be kept contiguous
@@ -2634,8 +2652,11 @@
             if (value.data instanceof Uint8Array) {
               totalBytes += value.data.byteLength;
 
-              if (user !== undefined && value.user === user &&
-                  (device === undefined || value.device === device)) {
+              // Omitted user/device widens the selection: (user) = every
+              // device of that user, () = everything (All Users)
+              const inSelection = (user === undefined || value.user === user) &&
+                (device === undefined || value.device === device);
+              if (inSelection) {
                 selectionBytes += value.data.byteLength;
                 // Empty days are cached as zero-byte buffers
                 if (value.data.byteLength > 0) selectionDaysWithData++;
@@ -3643,31 +3664,41 @@
   async function updateRefreshButton() {
     const storageEnabled = getSetting('storageEnabled', true);
     const user = document.getElementById('userSelect').value;
-    const device = document.getElementById('deviceSelect').value;
-    // Refresh button and cache text only make sense for a single
-    // user/device selection
-    const singleSelection = user && device && user !== ALL_SELECTOR && device !== ALL_SELECTOR;
 
-    let hasCachedData = false;
+    // Expand the selection into concrete user/device combos so "All
+    // Devices" and "All Users" get the same cache status as a single
+    // user/device
+    let combos = [];
+    if (storageEnabled && user) {
+      try {
+        combos = await resolveSelectedCombos();
+      } catch (e) {
+        logWarn('Failed to resolve selection for cache status:', e);
+      }
+    }
+
     let cachedCount = 0;
     let requestedCount = 0;
-    let cachedDays = new Set();
 
-    if (storageEnabled && singleSelection) {
+    if (combos.length > 0) {
       const { from, to } = getDateRange();
       const fromDate = formatDateForInput(from);
       const toDate = formatDateForInput(to);
       const requestedDays = getDaysInRange(fromDate, toDate);
-      cachedDays = await getCachedDays(user, device);
+      // The current day is never cached, so it stays out of the counts
+      // entirely: "x/y days cached" describes the cacheable days and
+      // "all cached" stays reachable while today is inside the range
+      const todayKey = formatDateForInput(new Date());
+      const cacheableDays = requestedDays.filter(day => day !== todayKey);
+      requestedCount = cacheableDays.length * combos.length;
 
-      requestedCount = requestedDays.length;
-
-      cachedCount = requestedDays.filter(day => cachedDays.has(day)).length;
-
-      hasCachedData = cachedCount > 0;
+      for (const { user: comboUser, device: comboDevice } of combos) {
+        const cachedDays = await getCachedDays(comboUser, comboDevice);
+        cachedCount += cacheableDays.filter(day => cachedDays.has(day)).length;
+      }
     }
 
-    const showRefresh = storageEnabled && hasCachedData;
+    const showRefresh = storageEnabled && cachedCount > 0;
 
     document.getElementById('refreshBtn').style.display = showRefresh ? 'block' : 'none';
 
@@ -3675,7 +3706,9 @@
       if (cachedCount === requestedCount) {
         document.getElementById('loadDataBtn').textContent = 'Load Data (all cached)';
       } else {
-        document.getElementById('loadDataBtn').textContent = `Load Data (${cachedCount}/${requestedCount} days cached)`;
+        // Multi-combo selections count each user/device's days separately
+        const unit = combos.length > 1 ? 'device-days' : 'days';
+        document.getElementById('loadDataBtn').textContent = `Load Data (${cachedCount}/${requestedCount} ${unit} cached)`;
       }
       document.getElementById('refreshBtn').textContent = 'Refresh from API';
     } else {
@@ -3688,18 +3721,32 @@
     let statusText = null;
     let usageText = null;
 
-    if (storageEnabled && singleSelection) {
-      usage = await calculateStorageUsage(user, device);
+    if (storageEnabled && combos.length === 1) {
+      const { user: comboUser, device: comboDevice } = combos[0];
+      usage = await calculateStorageUsage(comboUser, comboDevice);
       const daysWord = usage.daysWithData === 1 ? 'day' : 'days';
-      statusText = `Cache: ${usage.daysWithData.toLocaleString()} ${daysWord} with data for ${user}/${device}`;
+      statusText = `Cache: ${usage.daysWithData.toLocaleString()} ${daysWord} with data for ${comboUser}/${comboDevice}`;
       usageText = `${formatBytes(usage.selection)} / ${formatBytes(usage.total)} used`;
-    } else if (storageEnabled && user && user !== ALL_SELECTOR) {
-      // All Devices for one user: selection bytes = every device of that user
-      usage = await calculateStorageUsage(user);
-      statusText = 'Cache: enabled';
-      usageText = `${formatBytes(usage.selection)} / ${formatBytes(usage.total)} used`;
+    } else if (storageEnabled && combos.length > 1) {
+      const allUsers = user === ALL_SELECTOR;
+      // All Devices of one user: selection bytes = every device of that
+      // user; All Users: the selection is everything, so only the total
+      // is meaningful
+      usage = allUsers
+        ? await calculateStorageUsage()
+        : await calculateStorageUsage(user);
+      const daysWord = usage.daysWithData === 1 ? 'device-day' : 'device-days';
+      const devicesWord = combos.length === 1 ? 'device' : 'devices';
+      const usersWord = state.data.users.length === 1 ? 'user' : 'users';
+      const scope = allUsers
+        ? `all users (${state.data.users.length} ${usersWord}, ${combos.length} ${devicesWord})`
+        : `${user} (${combos.length} ${devicesWord})`;
+      statusText = `Cache: ${usage.daysWithData.toLocaleString()} ${daysWord} with data for ${scope}`;
+      usageText = allUsers
+        ? `${formatBytes(usage.total)} used`
+        : `${formatBytes(usage.selection)} / ${formatBytes(usage.total)} used`;
     } else if (storageEnabled) {
-      // All Users: the selection is everything, so only the total is shown
+      // No concrete selection yet - only the grand total is shown
       usage = await calculateStorageUsage();
       statusText = 'Cache: enabled';
       usageText = `${formatBytes(usage.total)} used`;
@@ -3761,9 +3808,13 @@
 
         const comboData = await fetchLocations(user, device, rangeFrom, rangeTo);
 
-        // Cache the data by day if storage is enabled
-        if (storageEnabled && comboData.length > 0) {
+        // Cache every day in the range, even when the fetch returned
+        // nothing - keeps day keys consistent with the load path
+        if (storageEnabled) {
           const dailyData = splitDataByDays(comboData, fromDate, toDate);
+          // The current day is never cached (incomplete by nature) - the
+          // loadData call below fetches it fresh instead
+          delete dailyData[formatDateForInput(new Date())];
           await cacheDailyData(user, device, dailyData);
           log(`[Refresh Debug] Cached ${comboData.length} points for ${label} across ${requestedDays.length} day(s)`);
         }
