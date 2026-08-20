@@ -287,7 +287,9 @@
     'heatmapMaxZoom': 'display.heatmap.maxZoom',
     'heatmapZoomScaling': 'display.heatmap.zoomScaling',
     // Storage
-    'storageEnabled': 'display.storageEnabled'
+    'storageEnabled': 'display.storageEnabled',
+    // Map
+    'satelliteEnabled': 'map.satelliteEnabled'
   };
 
   function getSetting(key, defaultValue) {
@@ -348,8 +350,14 @@
   // Default map settings (used if not in config)
   const DEFAULT_MAP_SETTINGS = {
     tileServer: "https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+    satelliteTileServer: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    // Transparent road/place-name tiles layered over the imagery (hybrid
+    // view); set to "" in config for plain satellite
+    satelliteLabelServer: "https://basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}.png",
     minZoom: 2,
-    maxZoom: 21
+    maxZoom: 21,
+    // Esri imagery tops out at 19; tiles upscale beyond that rather than 404
+    satelliteMaxZoom: 19
   };
 
   function getMapSetting(key) {
@@ -433,17 +441,43 @@
       }
     });
 
-    const tileUrl = getMapSetting('tileServer');
-    log('Adding tile layer with URL:', tileUrl);
+    const satellite = getSetting('satelliteEnabled', false);
+    // The class exempts satellite tiles (imagery + labels) from the
+    // dark-mode invert filter so they render true-colour in either theme
+    document.getElementById('map').classList.toggle('satellite-active', satellite);
+    log(satellite ? 'Switching to satellite tile layer' : 'Switching to street tile layer');
 
-    const tileLayer = L.tileLayer(tileUrl, {
-      minZoom: getMapSetting('minZoom'),
-      maxZoom: getMapSetting('maxZoom'),
-      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, © CARTO | Powered by <a href="https://leafletjs.com/">Leaflet</a>',
-      crossOrigin: true
-    });
+    const addTileLayer = (url, options) => L.tileLayer(url, options).addTo(state.map);
 
-    tileLayer.addTo(state.map);
+    if (satellite) {
+      // Only set maxNativeZoom when used: Leaflet checks it against
+      // undefined, so a null would clamp every zoom to null
+      addTileLayer(getMapSetting('satelliteTileServer'), {
+        minZoom: getMapSetting('minZoom'),
+        maxZoom: getMapSetting('maxZoom'),
+        maxNativeZoom: getMapSetting('satelliteMaxZoom'),
+        attribution: 'Imagery © Esri, Maxar, Earthstar Geographics | Labels © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, © CARTO | Powered by <a href="https://leafletjs.com/">Leaflet</a>',
+        crossOrigin: true
+      });
+
+      // Hybrid view: transparent road/place-name tiles above the imagery
+      const labelServer = getMapSetting('satelliteLabelServer');
+      if (labelServer) {
+        addTileLayer(labelServer, {
+          minZoom: getMapSetting('minZoom'),
+          maxZoom: getMapSetting('maxZoom'),
+          maxNativeZoom: getMapSetting('satelliteMaxZoom'),
+          crossOrigin: true
+        });
+      }
+    } else {
+      addTileLayer(getMapSetting('tileServer'), {
+        minZoom: getMapSetting('minZoom'),
+        maxZoom: getMapSetting('maxZoom'),
+        attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, © CARTO | Powered by <a href="https://leafletjs.com/">Leaflet</a>',
+        crossOrigin: true
+      });
+    }
   }
 
   // ============================================================================
@@ -824,6 +858,7 @@
     document.getElementById('qaPoints').addEventListener('click', () => toggleDisplaySetting('showPoints', true));
     document.getElementById('qaLines').addEventListener('click', () => toggleDisplaySetting('showLines', true));
     document.getElementById('qaHeatmap').addEventListener('click', () => toggleDisplaySetting('heatmapEnabled', false));
+    document.getElementById('qaSatellite').addEventListener('click', toggleSatelliteView);
 
     // Keyboard shortcuts + help overlay
     document.addEventListener('keydown', handleShortcutKey);
@@ -1175,6 +1210,7 @@
     const points = getSetting('showPoints', true);
     const lines = getSetting('showLines', true);
     const heatmap = getSetting('heatmapEnabled', false);
+    const satellite = getSetting('satelliteEnabled', false);
 
     document.getElementById('qaPoints').classList.toggle('active', points);
     document.getElementById('qaPoints').setAttribute('aria-pressed', points);
@@ -1182,6 +1218,17 @@
     document.getElementById('qaLines').setAttribute('aria-pressed', lines);
     document.getElementById('qaHeatmap').classList.toggle('active', heatmap);
     document.getElementById('qaHeatmap').setAttribute('aria-pressed', heatmap);
+    document.getElementById('qaSatellite').classList.toggle('active', satellite);
+    document.getElementById('qaSatellite').setAttribute('aria-pressed', satellite);
+  }
+
+  // Tile-server toggle - persisted with a null default (like the dock
+  // toggles) so an explicit choice always wins over config-file values.
+  // Only the tile layers change; no data redraw needed.
+  function toggleSatelliteView() {
+    saveSetting('satelliteEnabled', !getSetting('satelliteEnabled', false), null);
+    updateTileLayer();
+    updateQuickActionsBar();
   }
 
   // ============================================================================

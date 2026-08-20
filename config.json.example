@@ -10,7 +10,11 @@
   "map": {
     "tileServer": "https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
     "minZoom": 2,
-    "maxZoom": 21
+    "maxZoom": 21,
+    "satelliteEnabled": false,
+    "satelliteTileServer": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    "satelliteLabelServer": "https://basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}.png",
+    "satelliteMaxZoom": 19
   },
   "defaults": {
     "user": "owntracks-user",

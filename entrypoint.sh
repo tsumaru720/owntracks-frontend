@@ -29,6 +29,11 @@ jq -n '
     "APP_MAP_MINZOOM": ["map", "minZoom"],
     "APP_MAP_MAXZOOM": ["map", "maxZoom"],
 
+    "APP_MAP_SATELLITEENABLED": ["map", "satelliteEnabled"],
+    "APP_MAP_SATELLITETILESERVER": ["map", "satelliteTileServer"],
+    "APP_MAP_SATELLITELABELSERVER": ["map", "satelliteLabelServer"],
+    "APP_MAP_SATELLITEMAXZOOM": ["map", "satelliteMaxZoom"],
+
     "APP_DEFAULTS_USER": ["defaults", "user"],
     "APP_DEFAULTS_DEVICE": ["defaults", "device"],
 

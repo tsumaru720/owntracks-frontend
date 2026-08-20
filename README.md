@@ -106,6 +106,10 @@ It is recommended to view this document directly as the table is too wide for th
 | `APP_MAP_TILESERVER` | `map.tileServer` | Map tile server URL template | No | `https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png` |
 | `APP_MAP_MINZOOM` | `map.minZoom` | Minimum zoom level | No | `2` |
 | `APP_MAP_MAXZOOM` | `map.maxZoom` | Maximum zoom level | No | `21` |
+| `APP_MAP_SATELLITEENABLED` | `map.satelliteEnabled` | Enable satellite tiles by default (layer toggle button) | No | `false` |
+| `APP_MAP_SATELLITETILESERVER` | `map.satelliteTileServer` | Satellite tile server URL template | No | `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}` |
+| `APP_MAP_SATELLITELABELSERVER` | `map.satelliteLabelServer` | Road/place-name overlay for satellite view (empty string disables) | No | `https://basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}.png` |
+| `APP_MAP_SATELLITEMAXZOOM` | `map.satelliteMaxZoom` | Max native zoom for satellite tiles (upscaled beyond) | No | `19` |
 | `APP_DEFAULTS_USER` | `defaults.user` | Default username to select | No | — |
 | `APP_DEFAULTS_DEVICE` | `defaults.device` | Default device to select | No | — |
 | `APP_DISPLAY_POINTS_SHOW` | `display.points.show` | Show points by default | No | `true` |

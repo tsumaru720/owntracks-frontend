@@ -306,6 +306,35 @@ body.dark-mode {
   opacity: 0.9;
 }
 
+/* Divider inside the dock - map controls above, data-layer toggles below.
+   The line is a pseudo-element centred inside a fixed-height box (7px) so
+   the surrounding gap stays equal above and below it; with the dock's 4px
+   gap that gives 7px clear space on each side of the line. Ink-to-line
+   distances differ in mixed toggle states (an active button paints a
+   filled circle to its edge, an inactive one only its icon) - that
+   asymmetry is perceptual; the box-centred position is the intended one */
+.quick-action-separator {
+  height: 7px;
+  margin: 0 10px;
+  flex: none;
+  display: flex;
+  align-items: center;
+}
+
+.quick-action-separator::before {
+  content: '';
+  width: 100%;
+  height: 1px;
+}
+
+.light-mode .quick-action-separator::before {
+  background-color: var(--border-light);
+}
+
+.dark-mode .quick-action-separator::before {
+  background-color: var(--border-dark);
+}
+
 /* Sidebar */
 .sidebar {
   position: fixed;
@@ -1345,6 +1374,13 @@ body:not(.ui-ready) .sub-section-content {
 .dark-mode .leaflet-marker-shadow,
 .dark-mode .leaflet-popup {
   filter: invert(0.9) hue-rotate(170deg) brightness(1.5) contrast(1.2) saturate(0.3) !important;
+}
+
+/* Satellite tiles must render as true-colour imagery in either theme -
+   exempt just the tile pane from the dark-mode filter above (points/lines
+   keep their existing dark-mode behaviour) */
+.dark-mode #map.satellite-active .leaflet-tile-pane .leaflet-layer {
+  filter: none !important;
 }
 
 /* Responsive */
