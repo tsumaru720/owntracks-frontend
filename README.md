@@ -67,7 +67,8 @@ The OwnTracks recorder (the API) can take a long time to give a response if quer
 
 - **Smart Caching**: Display changes use cached data; no repeated API calls
 - **Multiple Visualizations**: Points, route lines, altitude gradients, heatmap
-- **Data Persistence**: Optional localStorage caching across sessions
+- **Satellite View**: Toggle between street tiles and satellite imagery (with an optional road/place-name overlay) from the map dock
+- **Data Persistence**: Optional IndexedDB caching across sessions
 - **Dark/Light Mode**: Theme toggle with persistence
 - **Configurable Filters**: GPS accuracy filter, date ranges, quick presets
 
@@ -76,9 +77,20 @@ The OwnTracks recorder (the API) can take a long time to give a response if quer
 1. Select user and device from dropdowns
 2. Pick a date range via the quick preset buttons, or set a custom From/To range
 3. Click "Load Data"
-4. Toggle points/lines/heatmap and recenter from the floating quick actions dock on the map
+4. Toggle points/lines/heatmap, switch street/satellite tiles, and recenter from the floating quick actions dock on the map
 5. Customize styling in the sidebar (all changes use cached data)
 6. Toggle dark/light mode at bottom of sidebar
+
+### Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `?` | Toggle the keyboard shortcuts help |
+| `H` | Toggle heatmap |
+| `P` | Toggle points |
+| `L` | Toggle lines |
+| `M` | Toggle satellite view |
+| `F` | Fit map to data |
 
 ## Configuration
 
@@ -198,7 +210,8 @@ services:
 - Floating dock on the left edge of the map (slides along with the sidebar)
 - Recenter map on loaded data
 - Toggle points, route lines, and heatmap visibility
-- Toggle states are saved in browser settings; defaults can be set via `display.points.show`, `display.lines.show`, and `display.heatmap.enabled`
+- Switch between street tiles and satellite imagery (hybrid view: imagery plus a road/place-name overlay; set `map.satelliteLabelServer` to an empty string for plain imagery)
+- Toggle states are saved in browser settings; defaults can be set via `display.points.show`, `display.lines.show`, `display.heatmap.enabled`, and `map.satelliteEnabled`
 
 ### Points
 - Customize color/size/opacity (visibility via the quick actions dock)
@@ -222,8 +235,10 @@ services:
 - 0 = show all points
 
 ### Statistics
-- Total/visible point counts, loaded time range, and maximum accuracy for the current selection
-- Cache status shown when browser storage caching is enabled: days cached for the selection plus storage usage
+- Total/visible point counts, loaded time range, and accuracy and altitude ranges for the current selection
+- Accuracy/altitude ranges span every loaded point of the selection (points that don't report the value are ignored); the min rounds down and the max rounds up
+- The total count shows a cached/fresh breakdown beneath it when the load used both the cache and the API
+- Cache status shown when browser storage caching is enabled: days with cached data for the selection plus storage usage (see Data Caching)
 
 ### Debug Options
 - **Console Logging**: Toggle console output
@@ -238,12 +253,19 @@ services:
 1. **Memory Cache** (automatic): API responses stored in memory; display changes trigger instant redraws
 2. **Storage Cache** (optional): Enable "Cache location data in browser" (Debug section) to persist across sessions in IndexedDB; data cached per day per device
 
+Storage cache behaviour:
+- On page load, a selection with cached days inside the current date range renders straight from the cache with no API traffic; uncached days and the current day fill in on the next Load Data or Refresh from API
+- The current day is never cached - it is always fetched fresh while inside the selected range, and cached complete from the following day
+- Days that return no data are cached as empty, so completed ranges are not re-fetched
+- The Load Data button and cache status cover "All Devices"/"All Users" selections too, counting device-days when multiple devices are selected
+
 ## Performance
 
 - Canvas rendering with dedicated canvases for points and lines, so updating one layer never re-renders the other
 - Point markers are culled to the viewport when zoomed in (zoomed-out views draw the full set)
 - Route lines are sliced to the padded viewport and decimated with a sub-pixel tolerance (capped at 10k vertices per render via an adaptive tolerance), then re-sliced after zooms and large pans - so Leaflet's per-vertex line pipeline only ever sees the visible portion of the track; altitude-gradient lines are batched into one multi-part polyline per colour
 - Zoom-triggered line/heatmap redraws run debounced after the zoom settles
+- Cached loads read all requested days in a single IndexedDB range query instead of one read per day; storage-usage totals are walked once and memoized until the cache changes
 - Uses `L.circleMarker` for efficient rendering
 - Auto-fits map bounds when data loads
 
@@ -255,6 +277,7 @@ Requires ES6, localStorage, Fetch API, CSS Grid/Flexbox. Tested on Chrome, Firef
 
 - [Leaflet.js](https://leafletjs.com/) - Map rendering
 - [CARTO](https://carto.com/) - Map tiles
+- [Esri](https://www.esri.com/), Maxar, Earthstar Geographics - Satellite imagery (satellite view)
 - [Leaflet.heat](https://github.com/Leaflet/Leaflet.heat) - Heatmap
 - [OwnTracks](https://owntracks.org/) - Location tracking platform
 - [static-web-server](https://github.com/static-web-server/static-web-server) - Static Web Server
