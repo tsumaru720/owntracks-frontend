@@ -526,27 +526,14 @@
         const currentValue = e.target.dataset.value || '';
 
         if (currentValue) {
-          // Handle both 'T' and ' ' separators
-          const separator = currentValue.includes('T') ? 'T' : ' ';
-          const [datePart, timePart] = currentValue.split(separator);
-          const parts = datePart.split('-').map(Number);
-          const year = parts[0];
-          const month = parts[1];
-          const day = parts[2];
-          const timeParts = timePart ? timePart.split(':').map(Number) : [0, 0];
-          const hour = timeParts[0];
-          const minute = timeParts[1];
-
-          if (!isNaN(year) && !isNaN(month) && !isNaN(day)) {
-            pickerCurrentDate = new Date(year, month - 1, day, hour || 0, minute || 0);
-          } else {
-            pickerCurrentDate = new Date();
-            pickerCurrentDate.setMinutes(0, 0, 0);
-          }
+          // Values are day-granular 'YYYY-MM-DD' (legacy values may carry a
+          // time - the day part is all that matters)
+          const parsed = parseLocalDay(currentValue.split('T')[0]);
+          pickerCurrentDate = isNaN(parsed) ? new Date() : parsed;
         } else {
           pickerCurrentDate = new Date();
-          pickerCurrentDate.setMinutes(0, 0, 0);
         }
+        pickerCurrentDate.setHours(0, 0, 0, 0);
 
         // Reset to days view when opening
         pickerViewMode = 'days';
@@ -579,11 +566,10 @@
         const year = pickerCurrentDate.getFullYear();
         const month = String(pickerCurrentDate.getMonth() + 1).padStart(2, '0');
         const day = String(pickerCurrentDate.getDate()).padStart(2, '0');
-        const hour = String(pickerCurrentDate.getHours()).padStart(2, '0');
-        const minute = String(pickerCurrentDate.getMinutes()).padStart(2, '0');
 
-        const dateStr = `${year}-${month}-${day}T${hour}:${minute}`;
-        currentPickerInput.value = dateStr;
+        // Dates are day-granular - there is no time component
+        const dateStr = `${year}-${month}-${day}`;
+        currentPickerInput.value = formatDisplayDate(pickerCurrentDate);
         currentPickerInput.dataset.value = dateStr;
 
         if (currentPickerInput.id === 'fromDate') {
@@ -636,23 +622,6 @@
       });
     });
 
-    // Time input changes
-    const handleTimeChange = () => {
-      const hourInput = document.getElementById('pickerHour');
-      const minuteInput = document.getElementById('pickerMinute');
-      let hour = parseInt(hourInput.value) || 0;
-      let minute = parseInt(minuteInput.value) || 0;
-
-      hour = Math.max(0, Math.min(23, hour));
-      minute = Math.max(0, Math.min(59, minute));
-
-      pickerCurrentDate.setHours(hour);
-      pickerCurrentDate.setMinutes(minute);
-    };
-
-    document.getElementById('pickerHour').addEventListener('change', handleTimeChange);
-    document.getElementById('pickerMinute').addEventListener('change', handleTimeChange);
-
     function renderDatePicker(date) {
       const year = date.getFullYear();
       const month = date.getMonth();
@@ -681,9 +650,6 @@
         }
         renderDatePicker(pickerCurrentDate);
       };
-
-      document.getElementById('pickerHour').value = String(date.getHours()).padStart(2, '0');
-      document.getElementById('pickerMinute').value = String(date.getMinutes()).padStart(2, '0');
 
       const daysHeader = document.querySelector('.date-picker-days-header');
       const daysGrid = document.querySelector('.date-picker-days');
@@ -740,11 +706,6 @@
             e.stopPropagation();
             const day = parseInt(dayEl.dataset.day);
             pickerCurrentDate.setDate(day);
-            pickerCurrentDate.setHours(
-              parseInt(document.getElementById('pickerHour').value) || 0,
-              parseInt(document.getElementById('pickerMinute').value) || 0,
-              0
-            );
 
             document.querySelectorAll('.date-picker-day').forEach(d => d.classList.remove('selected'));
             dayEl.classList.add('selected');
@@ -1628,10 +1589,13 @@
       if (savedFrom && savedTo) {
         const fromInput = document.getElementById('fromDate');
         const toInput = document.getElementById('toDate');
-        fromInput.value = savedFrom.replace('T', ' ');
-        fromInput.dataset.value = savedFrom;
-        toInput.value = savedTo.replace('T', ' ');
-        toInput.dataset.value = savedTo;
+        // Legacy saved values may carry a time component - strip to the day
+        const fromDay = savedFrom.split('T')[0];
+        const toDay = savedTo.split('T')[0];
+        fromInput.value = formatDisplayDate(parseLocalDay(fromDay));
+        fromInput.dataset.value = fromDay;
+        toInput.value = formatDisplayDate(parseLocalDay(toDay));
+        toInput.dataset.value = toDay;
       } else {
         // No custom range saved yet - fall back to the default preset
         const { from, to } = resolveDatePreset('30days');
@@ -1653,6 +1617,14 @@
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
+  }
+
+  // Parse a local 'YYYY-MM-DD' string as a LOCAL date - new Date('YYYY-MM-DD')
+  // would parse as UTC midnight and land on the previous day in western
+  // timezones
+  function parseLocalDay(dayStr) {
+    const [y, m, d] = dayStr.split('-').map(Number);
+    return new Date(y, m - 1, d);
   }
 
   function formatDateForAPI(date, timeBoundary) {
@@ -1694,15 +1666,6 @@
     return result;
   }
 
-  function formatDateTimeForInput(date) {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    const hours = String(date.getHours()).padStart(2, '0');
-    const minutes = String(date.getMinutes()).padStart(2, '0');
-    return `${year}-${month}-${day}T${hours}:${minutes}`;
-  }
-
   function getDateRange() {
     const preset = getSetting('datePreset', '30days');
 
@@ -1714,14 +1677,16 @@
       return { from, to };
     }
 
-    // Custom range: local "YYYY-MM-DDTHH:mm" strings, converted to UTC at
-    // query time
+    // Custom range: local day-granular 'YYYY-MM-DD' strings (legacy saved
+    // values may still carry a time - the day part is all that matters)
     const fromVal = document.getElementById('fromDate').dataset.value || document.getElementById('fromDate').value;
     const toVal = document.getElementById('toDate').dataset.value || document.getElementById('toDate').value;
-    return {
-      from: new Date(fromVal.replace(' ', 'T')),
-      to: new Date(toVal.replace(' ', 'T'))
-    };
+    const from = parseLocalDay(String(fromVal).split('T')[0]);
+    const to = parseLocalDay(String(toVal).split('T')[0]);
+    // The range spans whole local days: start of the from-day through the
+    // end of the to-day
+    to.setHours(23, 59, 59, 999);
+    return { from, to };
   }
 
   // Built once - Intl.DateTimeFormat construction is expensive
@@ -1781,14 +1746,14 @@
   }
 
   function setDateInputs(from, to) {
-    const fromStr = formatDateTimeForInput(from);
-    const toStr = formatDateTimeForInput(to);
+    // Day-granular values: dataset.value carries the ISO date, the visible
+    // input shows a friendly local format
     const fromInput = document.getElementById('fromDate');
     const toInput = document.getElementById('toDate');
-    fromInput.value = fromStr.replace('T', ' ');
-    fromInput.dataset.value = fromStr;
-    toInput.value = toStr.replace('T', ' ');
-    toInput.dataset.value = toStr;
+    fromInput.value = formatDisplayDate(from);
+    fromInput.dataset.value = formatDateForInput(from);
+    toInput.value = formatDisplayDate(to);
+    toInput.dataset.value = formatDateForInput(to);
   }
 
   function updateDatePresetButtons() {

@@ -780,35 +780,6 @@ body:not(.ui-ready) .sub-section-content {
   color: #fff !important;
 }
 
-.date-picker-time {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--border-light, #dee2e6);
-}
-
-.dark-mode .date-picker-time {
-  border-top-color: var(--border-dark, #333);
-}
-
-.date-picker-time input {
-  width: 50px;
-  text-align: center;
-  padding: 4px 8px;
-  font-size: 14px;
-  border: 1px solid var(--border-light, #dee2e6);
-  border-radius: 4px;
-  background: inherit;
-  color: inherit;
-}
-
-.dark-mode .date-picker-time input {
-  border-color: var(--border-dark, #333);
-}
-
 .date-picker-footer {
   display: flex;
   gap: 8px;
