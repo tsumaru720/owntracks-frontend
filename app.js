@@ -26,7 +26,8 @@
       filtered: [],      // Points after accuracy filter
       users: [],
       devicesByUser: {}, // Session cache of device lists per user
-      maxAccuracy: 0,
+      accuracyRange: { min: null, max: null },
+      altitudeRange: { min: null, max: null },
       timeRange: { start: null, end: null },
       sourceBreakdown: { cached: 0, fresh: 0 }
     },
@@ -2307,21 +2308,37 @@
 
       document.getElementById('qaRecenter').disabled = false;
 
-      // Single pass for time range and max accuracy. No Math.min(...spread):
-      // spreading a large array exceeds the argument limit (issue #3)
+      // Single pass for time range, accuracy range and altitude range. No
+      // Math.min(...spread): spreading a large array exceeds the argument
+      // limit (issue #3)
       let tstMin = Infinity;
       let tstMax = -Infinity;
-      state.data.maxAccuracy = 0;
+      let accMin = Infinity;
+      let accMax = -Infinity;
+      let altMin = Infinity;
+      let altMax = -Infinity;
       state.data.raw.forEach(point => {
         if (point.tst < tstMin) tstMin = point.tst;
         if (point.tst > tstMax) tstMax = point.tst;
-        if (point.acc && point.acc > state.data.maxAccuracy) {
-          state.data.maxAccuracy = point.acc;
+        // acc of 0/undefined means "no accuracy reported" - skip like the filter does
+        if (point.acc) {
+          if (point.acc < accMin) accMin = point.acc;
+          if (point.acc > accMax) accMax = point.acc;
+        }
+        if (typeof point.alt === 'number' && !Number.isNaN(point.alt)) {
+          if (point.alt < altMin) altMin = point.alt;
+          if (point.alt > altMax) altMax = point.alt;
         }
       });
       state.data.timeRange = { start: tstMin, end: tstMax };
+      state.data.accuracyRange = accMin === Infinity
+        ? { min: null, max: null }
+        : { min: accMin, max: accMax };
+      state.data.altitudeRange = altMin === Infinity
+        ? { min: null, max: null }
+        : { min: altMin, max: altMax };
 
-      const sliderMax = Math.max(500, Math.ceil(state.data.maxAccuracy / 10) * 10);
+      const sliderMax = Math.max(500, Math.ceil((state.data.accuracyRange.max ?? 0) / 10) * 10);
       document.getElementById('accuracySlider').max = sliderMax;
 
       applyAccuracyFilter();
@@ -2357,7 +2374,8 @@
   function clearMapData() {
     state.data.raw = [];
     state.data.filtered = [];
-    state.data.maxAccuracy = 0;
+    state.data.accuracyRange = { min: null, max: null };
+    state.data.altitudeRange = { min: null, max: null };
     state.data.timeRange = { start: null, end: null };
     state.data.sourceBreakdown = { cached: 0, fresh: 0 };
     lineTracks = [];
@@ -3604,7 +3622,19 @@
 
     document.getElementById('statTotal').textContent = `${totalPoints.toLocaleString()}${sourceSuffix}`;
     // Visible count is updated by redrawMap() and updateViewportStats() which account for viewport
-    document.getElementById('statMaxAccuracy').textContent = state.data.maxAccuracy + ' m';
+
+    // Ranges span every loaded point for the selected period (all selected
+    // users/devices); min rounds down, max rounds up, no decimal places
+    const acc = state.data.accuracyRange;
+    document.getElementById('statAccuracyRange').textContent =
+      acc?.min !== null && acc?.min !== undefined
+        ? `${Math.floor(acc.min)}m - ${Math.ceil(acc.max)}m`
+        : '-';
+    const alt = state.data.altitudeRange;
+    document.getElementById('statAltitudeRange').textContent =
+      alt?.min !== null && alt?.min !== undefined
+        ? `${Math.floor(alt.min)}m - ${Math.ceil(alt.max)}m`
+        : '-';
 
     if (state.data.timeRange.start && state.data.timeRange.end) {
       const start = formatDisplayDate(state.data.timeRange.start * 1000);
