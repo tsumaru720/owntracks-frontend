@@ -2504,6 +2504,7 @@
 
     // Update cache index with new days
     async updateCacheIndex(user, device, newDays) {
+      this.invalidateUsageTotals();
       const db = await this.open();
       return new Promise((resolve, reject) => {
         const tx = db.transaction([STORE_INDEX], 'readwrite');
@@ -2533,45 +2534,39 @@
       });
     },
 
-    // Get cached data for specific days
+    // Get cached data for specific days. One getAll over a key range of
+    // the compound [user, device, date] key replaces a get-per-day loop -
+    // a single transaction round trip no matter how many days are loaded.
+    // The day list comes from the cache index, so results are filtered
+    // back to it: a day the store holds but the index doesn't (a write
+    // interrupted mid-cache) must not widen the result.
     async getCachedData(user, device, days) {
+      if (days.length === 0) return [];
       const db = await this.open();
-      const results = [];
-
-      for (const day of days) {
-        const dayData = await this.getDayData(user, device, day);
-        if (dayData) {
-          // Loop rather than push(...spread) - a large spread exceeds the argument limit
-          for (const point of dayData) {
-            results.push(point);
-          }
-        }
-      }
-
-      return results;
-    },
-
-    // Get data for a single day
-    async getDayData(user, device, dateStr) {
-      const db = await this.open();
+      const sorted = [...days].sort();
       return new Promise((resolve, reject) => {
         const tx = db.transaction([STORE_CACHE], 'readonly');
-        const store = tx.objectStore(STORE_CACHE);
-        const request = store.get([user, device, dateStr]);
+        const request = tx.objectStore(STORE_CACHE).getAll(
+          IDBKeyRange.bound([user, device, sorted[0]], [user, device, sorted[sorted.length - 1]])
+        );
 
         request.onsuccess = () => {
-          const result = request.result;
-          if (result && result.data) {
+          const wanted = new Set(days);
+          const results = [];
+          for (const record of request.result) {
+            if (!wanted.has(record.date)) continue;
             try {
-              const points = decompressPoints(result.data);
-              resolve(points);
+              const points = decompressPoints(record.data);
+              // Loop rather than push(...spread) - a large spread exceeds
+              // the argument limit
+              for (const point of points) {
+                results.push(point);
+              }
             } catch (e) {
-              logWarn(`Failed to decompress cached day ${dateStr}:`, e);
-              resolve([]);
+              logWarn(`Failed to decompress cached day ${record.date}:`, e);
             }
-          } else {
-            resolve([]);
           }
+          resolve(results);
         };
         request.onerror = () => reject(request.error);
       });
@@ -2579,6 +2574,7 @@
 
     // Store data for a specific day
     async setDayData(user, device, dateStr, points) {
+      this.invalidateUsageTotals();
       const db = await this.open();
       return new Promise((resolve, reject) => {
         try {
@@ -2610,6 +2606,7 @@
 
     // Clear all cache data for all users/devices
     async clearAllCache() {
+      this.invalidateUsageTotals();
       const db = await this.open();
       return new Promise((resolve, reject) => {
         const tx = db.transaction([STORE_CACHE, STORE_INDEX], 'readwrite');
@@ -2627,6 +2624,7 @@
 
     // Clear cache for a specific user/device
     async clearUserCache(user, device) {
+      this.invalidateUsageTotals();
       const db = await this.open();
       return new Promise((resolve, reject) => {
         const tx = db.transaction([STORE_CACHE, STORE_INDEX], 'readwrite');
@@ -2656,6 +2654,7 @@
 
     // Clear cached data for every device belonging to a user
     async clearUserAllDevicesCache(user) {
+      this.invalidateUsageTotals();
       const db = await this.open();
       return new Promise((resolve, reject) => {
         const tx = db.transaction([STORE_CACHE, STORE_INDEX], 'readwrite');
@@ -2694,47 +2693,92 @@
     },
 
     // Bytes used by the given user/device alongside the total; omit
-    // user/device to count everything as the selection
-    async getStorageUsage(user, device) {
-      const db = await this.open();
-      return new Promise((resolve, reject) => {
-        let selectionBytes = 0;
-        let totalBytes = 0;
-        let selectionDaysWithData = 0;
+    // user/device to count everything as the selection.
+    //
+    // The store walk totals every user/device in one pass and is memoized
+    // until the next cache mutation, so the several updateRefreshButton
+    // calls per page load (and per selection change) walk the store once
+    // instead of each re-reading every record. Concurrent callers share
+    // the in-flight walk; a walk that completes after an invalidation
+    // doesn't repopulate the memo (generation check).
+    _usageTotals: null,
+    _usageTotalsReq: null,
+    _usageTotalsGen: 0,
+
+    invalidateUsageTotals() {
+      this._usageTotals = null;
+      this._usageTotalsGen++;
+    },
+
+    getUsageTotals() {
+      if (this._usageTotals) return Promise.resolve(this._usageTotals);
+      if (!this._usageTotalsReq) {
+        const gen = this._usageTotalsGen;
+        this._usageTotalsReq = this._walkUsageTotals()
+          .then(totals => {
+            if (gen === this._usageTotalsGen) this._usageTotals = totals;
+            return totals;
+          })
+          .finally(() => { this._usageTotalsReq = null; });
+      }
+      return this._usageTotalsReq;
+    },
+
+    _walkUsageTotals() {
+      return this.open().then(db => new Promise((resolve, reject) => {
+        let total = 0;
+        // { [user]: { [device]: { bytes, daysWithData } } }
+        const combos = {};
 
         const tx = db.transaction([STORE_CACHE], 'readonly');
-        const store = tx.objectStore(STORE_CACHE);
-        const request = store.openCursor();
+        const request = tx.objectStore(STORE_CACHE).openCursor();
 
         request.onsuccess = (event) => {
           const cursor = event.target.result;
           if (cursor) {
             const value = cursor.value;
-            // Estimate size: data buffer size + metadata
+            // Estimate size: data buffer size + metadata. Records without
+            // a Uint8Array payload are counted by neither side.
             if (value.data instanceof Uint8Array) {
-              totalBytes += value.data.byteLength;
-
-              // Omitted user/device widens the selection: (user) = every
-              // device of that user, () = everything (All Users)
-              const inSelection = (user === undefined || value.user === user) &&
-                (device === undefined || value.device === device);
-              if (inSelection) {
-                selectionBytes += value.data.byteLength;
-                // Empty days are cached as zero-byte buffers
-                if (value.data.byteLength > 0) selectionDaysWithData++;
-              }
+              total += value.data.byteLength;
+              const perUser = (combos[value.user] ||= {});
+              const agg = (perUser[value.device] ||= { bytes: 0, daysWithData: 0 });
+              agg.bytes += value.data.byteLength;
+              // Empty days are cached as zero-byte buffers
+              if (value.data.byteLength > 0) agg.daysWithData++;
             }
             cursor.continue();
           }
         };
 
-        tx.oncomplete = () => resolve({
-          selection: selectionBytes,
-          total: totalBytes,
-          selectionDaysWithData
-        });
+        tx.oncomplete = () => resolve({ total, combos });
         tx.onerror = () => reject(tx.error);
-      });
+      }));
+    },
+
+    async getStorageUsage(user, device) {
+      const { total, combos } = await this.getUsageTotals();
+      let selection = 0;
+      let selectionDaysWithData = 0;
+
+      // Omitted user/device widens the selection: (user) = every device
+      // of that user, () = everything (All Users)
+      const users = user === undefined ? Object.keys(combos) : [user];
+      for (const u of users) {
+        const perUser = combos[u];
+        if (!perUser) continue;
+        for (const [d, agg] of Object.entries(perUser)) {
+          if (device !== undefined && d !== device) continue;
+          selection += agg.bytes;
+          selectionDaysWithData += agg.daysWithData;
+        }
+      }
+
+      return {
+        selection,
+        total,
+        selectionDaysWithData
+      };
     }
   };
 
@@ -3609,6 +3653,12 @@
     document.getElementById('loadingTimer').textContent = 'Time: 0:00';
     document.getElementById('loadingOverlay').classList.add('visible');
 
+    // Phases and combos re-call showLoading; clear the previous interval
+    // so they don't pile up (each tick writes the same text, but orphaned
+    // timers persist for the page lifetime)
+    if (state.loadingTimerInterval) {
+      clearInterval(state.loadingTimerInterval);
+    }
     state.loadingStartTime = Date.now();
     state.loadingTimerInterval = setInterval(updateLoadingTimer, 1000);
   }
