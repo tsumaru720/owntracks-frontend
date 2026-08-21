@@ -269,6 +269,28 @@ Storage cache behaviour:
 - Uses `L.circleMarker` for efficient rendering
 - Auto-fits map bounds when data loads
 
+## Examples
+
+### Points
+![Points - UK](./docs/images/points.jpg)
+
+### Route Lines
+![Route Lines - Las Vegas](./docs/images/lines.jpg)
+
+### Heatmap
+![Heatmap - UK](./docs/images/heatmap_overview.jpg)
+
+### Heatmap Tuning for closer zooms
+
+This illustrates how you can tweak the heatmap settings to alter data visualization
+
+![Heatmap - Glasgow](./docs/images/heatmap_glasgow.jpg)
+![Heatmap - Tokyo](./docs/images/heatmap_tokyo.jpg)
+
+### Satellite View
+
+![Satellite View - London ](./docs/images/satellite.jpg)
+
 ## Browser Compatibility
 
 Requires ES6, localStorage, Fetch API, CSS Grid/Flexbox. Tested on Chrome, Firefox, Safari, Edge.
