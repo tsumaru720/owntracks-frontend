@@ -237,9 +237,17 @@
     }
   }
 
+  // Strict equality, except ranges stored as [min, max] arrays compare
+  // element-wise so a default range still cleans up out of storage
+  function settingsValuesEqual(a, b) {
+    return a === b ||
+      (Array.isArray(a) && Array.isArray(b) &&
+        a.length === b.length && a.every((v, i) => v === b[i]));
+  }
+
   function saveSetting(key, value, defaultValue) {
     // Only save if value differs from default
-    if (value === defaultValue) {
+    if (settingsValuesEqual(value, defaultValue)) {
       // Remove from settings if it's the default (clean up storage)
       delete state.settings[key];
     } else {
@@ -256,13 +264,21 @@
     'pointColor': 'display.points.color',
     'pointSize': 'display.points.size',
     'pointOpacity': 'display.points.opacity',
+    'sub_displayPointsConfig_collapsed': 'display.points.collapsed',
     // Lines
     'showLines': 'display.lines.show',
     'lineColor': 'display.lines.color',
     'lineWidth': 'display.lines.width',
     'lineOpacity': 'display.lines.opacity',
+    'sub_displayLinesConfig_collapsed': 'display.lines.collapsed',
     // Accuracy
     'accuracyMaxMeters': 'display.accuracy.maxMeters',
+    // Minimum altitude
+    'minAltitudeMeters': 'display.altitude.minMeters',
+    // Coordinate precision (decimal places of lat/lon)
+    'precisionLinked': 'display.precision.linked',
+    'latitudePrecisionRange': 'display.precision.latitudeRange',
+    'longitudePrecisionRange': 'display.precision.longitudeRange',
     // Altitude Points
     'altitudeEnabled': 'display.altitude.points.enabled',
     'altitudeMin': 'display.altitude.min',
@@ -287,6 +303,7 @@
     'heatmapMax': 'display.heatmap.max',
     'heatmapMaxZoom': 'display.heatmap.maxZoom',
     'heatmapZoomScaling': 'display.heatmap.zoomScaling',
+    'sub_displayHeatmapConfig_collapsed': 'display.heatmap.collapsed',
     // Storage
     'storageEnabled': 'display.storageEnabled',
     // Map
@@ -315,6 +332,7 @@
   }
 
   function getNestedConfigValue(path) {
+    if (!path) return undefined;
     const parts = path.split('.');
     let value = window.CONFIG;
     for (const part of parts) {
@@ -479,6 +497,105 @@
         crossOrigin: true
       });
     }
+  }
+
+  // Meter-filter slider scales: a linear 0-N slider gives ~0.5px per
+  // unit at the low end - every click near the left lands on the first
+  // stop, which silently means "show all" - so both filters use curated
+  // stops, fine where values cluster and widening upward. Rebuilt with
+  // further reach when loaded data demands it.
+  function buildAccuracySteps(dataMax) {
+    const steps = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20, 25, 30, 40, 50, 60, 80, 100, 125, 150, 200, 250, 300, 400, 500];
+    const top = Math.max(500, Math.ceil((dataMax || 0) / 50) * 50);
+    for (let v = 550; v <= top; v += 50) steps.push(v);
+    return steps;
+  }
+
+  // The altitude floor's scale is pinned to the data: stops never run
+  // past the highest loaded altitude, and the last stop IS that ceiling
+  function buildAltitudeSteps(dataMax) {
+    const base = [0, 5, 10, 20, 30, 50, 75, 100, 150, 200, 300, 400, 500, 750, 1000, 1500, 2000, 3000, 4000, 5000];
+    if (!dataMax) return base;
+    const top = Math.ceil(dataMax);
+    const steps = base.filter(v => v <= top);
+    for (let v = 5500; v < top; v += 500) steps.push(v);
+    if (steps[steps.length - 1] !== top) steps.push(top);
+    return steps;
+  }
+
+  // Controller for a stepped slider: the input position is a step
+  // index; the label and the setting store the real value. Values the
+  // scale can't express exactly (typed via the label editor, older
+  // saves, config) position the thumb at the nearest stop while the
+  // exact number keeps filtering and displaying.
+  function createSteppedSlider(sliderId, valueLabelId) {
+    let steps = [];
+    const stepIndex = (value) => {
+      let best = 0;
+      for (let i = 1; i < steps.length; i++) {
+        if (Math.abs(steps[i] - value) < Math.abs(steps[best] - value)) best = i;
+      }
+      return best;
+    };
+    const render = (value) => {
+      const slider = document.getElementById(sliderId);
+      slider.max = steps.length - 1;
+      slider.value = stepIndex(value);
+      document.getElementById(valueLabelId).textContent = value;
+    };
+    return {
+      valueAt: (index) => steps[index] ?? steps[0],
+      // Repoint the scale (a data load may pin/extend it) and the thumb
+      rebuild(newSteps, value) {
+        steps = newSteps;
+        render(value);
+      },
+      // Reposition without changing the scale (typed values)
+      position(value) {
+        render(value);
+      }
+    };
+  }
+
+  const accuracyCtl = createSteppedSlider('accuracySlider', 'accuracyValue');
+  const altitudeCtl = createSteppedSlider('altitudeSlider', 'altitudeValue');
+
+  // Click-to-edit for a stepped slider's numeric label: typing an exact
+  // value applies it directly - the thumb snaps to the nearest stop,
+  // the exact number is what filters and displays. Enter or blur
+  // commits, Escape cancels.
+  function wireSteppedValueEdit(spanId, apply) {
+    const span = document.getElementById(spanId);
+    span.classList.add('editable-value');
+    span.title = 'Click to enter an exact value';
+    span.addEventListener('click', () => {
+      if (span.querySelector('input')) return;
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.min = '0';
+      input.className = 'value-edit-input';
+      const original = span.textContent;
+      input.value = original;
+      let settled = false;
+      const finish = (commit) => {
+        if (settled) return;
+        settled = true;
+        span.textContent = original;
+        if (commit) {
+          const v = parseInt(input.value, 10);
+          if (Number.isFinite(v) && v >= 0) apply(v);
+        }
+      };
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') input.blur();
+        if (e.key === 'Escape') finish(false);
+      });
+      input.addEventListener('blur', () => finish(true));
+      span.textContent = '';
+      span.appendChild(input);
+      input.focus();
+      input.select();
+    });
   }
 
   // ============================================================================
@@ -886,25 +1003,69 @@
     bindSettingInput('lineWidth', 3, parseInt);
     bindSettingInput('lineOpacity', 0.7);
 
-    // Accuracy filter: the label updates live while dragging, but the
-    // filter + full redraw over every loaded point is debounced and
-    // flushed once the slider is released
-    const applyAccuracyDebounced = debounce(() => {
-      applyAccuracyFilter();
-      redrawMap();
-    }, 250);
+    // Accuracy + altitude filters: the label updates live while
+    // dragging, but the filter + full redraw over every loaded point is
+    // debounced and flushed once the slider is released. The input
+    // position is a step index; the label and setting hold real meters
     document.getElementById('accuracySlider').addEventListener('input', (e) => {
-      const value = parseInt(e.target.value);
+      const value = accuracyCtl.valueAt(parseInt(e.target.value, 10));
       document.getElementById('accuracyValue').textContent = value;
       saveSetting('accuracyMaxMeters', value, 0);
-      applyAccuracyDebounced();
+      refilterDebounced();
     });
-    document.getElementById('accuracySlider').addEventListener('change', () => applyAccuracyDebounced.flush());
+    document.getElementById('accuracySlider').addEventListener('change', () => refilterDebounced.flush());
 
-    // Altitude gradient
+    document.getElementById('altitudeSlider').addEventListener('input', (e) => {
+      const value = altitudeCtl.valueAt(parseInt(e.target.value, 10));
+      document.getElementById('altitudeValue').textContent = value;
+      saveSetting('minAltitudeMeters', value, 0);
+      refilterDebounced();
+    });
+    document.getElementById('altitudeSlider').addEventListener('change', () => refilterDebounced.flush());
+
+    // Clicking a meter filter's value opens an inline editor for an
+    // exact number (the stepped scale can't express every value)
+    wireSteppedValueEdit('accuracyValue', (v) => {
+      saveSetting('accuracyMaxMeters', v, 0);
+      accuracyCtl.position(v);
+      refilterNow();
+    });
+    wireSteppedValueEdit('altitudeValue', (v) => {
+      saveSetting('minAltitudeMeters', v, 0);
+      altitudeCtl.position(v);
+      refilterNow();
+    });
+
+    // Precision filter wiring (helpers live with the filter code, above
+    // applyAccuracyFilter)
+    wirePrecisionBar(document.getElementById('latPrecisionSlider'), 'lat');
+    wirePrecisionBar(document.getElementById('lonPrecisionSlider'), 'lon');
+
+    document.getElementById('precisionLink').addEventListener('click', () => {
+      const linked = !getSetting('precisionLinked', true);
+      saveSetting('precisionLinked', linked, true);
+      if (linked) {
+        // Re-tying adopts the latitude range (the bar that stays
+        // visible) for both axes
+        const range = getPrecisionRange('latitudePrecisionRange');
+        saveSetting('longitudePrecisionRange', [...range], [...PRECISION_DEFAULT_RANGE]);
+        syncDualRange(document.getElementById('lonPrecisionSlider'), range[0], range[1]);
+      }
+      syncPrecisionUI();
+      refilterDebounced();
+    });
+
+    // Altitude gradient: enable checkboxes and colour pickers unchanged;
+    // the old min/max number inputs are now a dual range pinned to the
+    // loaded data (resetAltitudeGradientToData), writing the same
+    // altitudeMin/altitudeMax settings
     bindSettingCheckbox('altitudeEnabled', false);
-    bindSettingInput('altitudeMin', 0, parseInt);
-    bindSettingInput('altitudeMax', 1000, parseInt);
+    wireDualRange(document.getElementById('altitudeGradientSlider'), (min, max) => {
+      saveSetting('altitudeMin', min, 0);
+      saveSetting('altitudeMax', max, 1000);
+      document.getElementById('altitudeGradientValue').textContent = `${min} – ${max}`;
+      refilterDebounced();
+    });
     bindSettingColor('altitudePointsLowColor', '#00ff00');
     bindSettingColor('altitudePointsHighColor', '#ff0000');
     bindSettingCheckbox('altitudeLinesEnabled', false);
@@ -1099,8 +1260,6 @@
       ['pointOpacity', 0.5],
       ['lineWidth', 3],
       ['lineOpacity', 0.7],
-      ['altitudeMin', 0],
-      ['altitudeMax', 1000],
       ['heatmapRadius', 25],
       ['heatmapBlur', 15],
       ['heatmapMinOpacity', 0.05],
@@ -1149,10 +1308,19 @@
       document.getElementById(id).checked = getSetting(id, def);
     });
 
-    // Accuracy filter
-    const accuracyMax = getSetting('accuracyMaxMeters', 0);
-    document.getElementById('accuracySlider').value = accuracyMax;
-    document.getElementById('accuracyValue').textContent = accuracyMax;
+    // Accuracy + altitude filters (steps are rebuilt on data load)
+    accuracyCtl.rebuild(buildAccuracySteps(0), getSetting('accuracyMaxMeters', 0));
+    altitudeCtl.rebuild(buildAltitudeSteps(0), getSetting('minAltitudeMeters', 0));
+
+    // Altitude gradient window (bounds pin to the data on load)
+    syncAltitudeGradient();
+
+    // Precision filter: bars, lock state and labels
+    const latRange = getPrecisionRange('latitudePrecisionRange');
+    syncDualRange(document.getElementById('latPrecisionSlider'), latRange[0], latRange[1]);
+    const lonRange = getPrecisionRange('longitudePrecisionRange');
+    syncDualRange(document.getElementById('lonPrecisionSlider'), lonRange[0], lonRange[1]);
+    syncPrecisionUI();
 
     await updateRefreshButton();
 
@@ -1463,7 +1631,13 @@
     subSections.forEach(header => {
       const subName = header.getAttribute('data-sub');
       const content = header.nextElementSibling;
-      const wasCollapsed = getSetting(`sub_${subName}_collapsed`, true);
+      const settingKey = `sub_${subName}_collapsed`;
+      // Config files may pin a different default collapse state; a stored
+      // local value still wins over it. saveSetting compares against the
+      // same default, so clicking back to the configured state drops the
+      // local override instead of storing a redundant copy
+      const configDefault = getNestedConfigValue(CONFIG_PATHS[settingKey]) ?? true;
+      const wasCollapsed = getSetting(settingKey, configDefault);
 
       if (wasCollapsed) {
         header.classList.add('collapsed');
@@ -1500,7 +1674,7 @@
 
       header.addEventListener('click', () => {
         const willCollapse = !header.classList.contains('collapsed');
-        saveSetting(`sub_${subName}_collapsed`, willCollapse, true);
+        saveSetting(settingKey, willCollapse, configDefault);
 
         if (willCollapse) {
           header.classList.add('collapsed');
@@ -2382,8 +2556,28 @@
         ? { min: null, max: null }
         : { min: altMin, max: altMax };
 
-      const sliderMax = Math.max(500, Math.ceil((state.data.accuracyRange.max ?? 0) / 10) * 10);
-      document.getElementById('accuracySlider').max = sliderMax;
+      // Pin the stepped scales to the new data's ranges, then - unless
+      // this is the boot-time cache restore, which re-renders the
+      // session the user left (filters included) - reset the meter
+      // filters to "show all" (persisted) and re-pin the gradient
+      // window to the new range at full span
+      accuracyCtl.rebuild(buildAccuracySteps(state.data.accuracyRange.max), getSetting('accuracyMaxMeters', 0));
+      altitudeCtl.rebuild(buildAltitudeSteps(state.data.altitudeRange.max), getSetting('minAltitudeMeters', 0));
+      const altRange = state.data.altitudeRange;
+      const hasAltitude = altRange.min !== null && altRange.min !== undefined;
+      if (!cacheOnly) {
+        saveSetting('accuracyMaxMeters', 0, 0);
+        saveSetting('minAltitudeMeters', 0, 0);
+        accuracyCtl.rebuild(buildAccuracySteps(state.data.accuracyRange.max), 0);
+        altitudeCtl.rebuild(buildAltitudeSteps(state.data.altitudeRange.max), 0);
+        if (hasAltitude) {
+          saveSetting('altitudeMin', Math.floor(altRange.min), 0);
+          saveSetting('altitudeMax', Math.ceil(altRange.max), 1000);
+        }
+      }
+      if (hasAltitude) {
+        syncAltitudeGradient(Math.floor(altRange.min), Math.ceil(altRange.max));
+      }
 
       applyAccuracyFilter();
 
@@ -2971,16 +3165,214 @@
     return ranges;
   }
 
+  // Precision filter bounds: decimal places 1-7 per coordinate. The
+  // floor of 1 always applies (whole-number coordinates are never
+  // shown), and the top step means "7 or more" - the only upper value
+  // that doesn't cap.
+  const PRECISION_MIN = 1;
+  const PRECISION_MAX = 7;
+  const PRECISION_DEFAULT_RANGE = [1, PRECISION_MAX];
+  // Thumb size matching the dual-range CSS, used to align fill edges
+  // and tick marks with thumb centres
+  const PRECISION_THUMB_PX = 16;
+
+  // Decimal places a coordinate value actually carries:
+  // 53.1 -> 1, 53.4534562 -> 7, 53 -> 0. Trailing zeros don't survive
+  // JSON parsing, so this counts the digits the stored value holds.
+  function decimalPlaces(value) {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
+    const str = String(value);
+    if (str.includes('e')) {
+      // Exponent form (e.g. 1e-7): the exponent sets the scale
+      const [mantissa, exponent] = str.split('e');
+      const mantissaDigits = mantissa.includes('.') ? mantissa.split('.')[1].length : 0;
+      const exp = parseInt(exponent, 10);
+      return exp >= 0 ? Math.max(0, mantissaDigits - exp) : mantissaDigits - exp;
+    }
+    return str.includes('.') ? str.length - str.indexOf('.') - 1 : 0;
+  }
+
+  // Read a [min, max] precision range, clamping to valid steps and
+  // falling back to the default for malformed values
+  function getPrecisionRange(key) {
+    const value = getSetting(key, null);
+    if (Array.isArray(value) && value.length === 2) {
+      const clampStep = (v) => Math.min(PRECISION_MAX, Math.max(PRECISION_MIN, Math.round(Number(v) || 0)));
+      return [clampStep(value[0]), clampStep(value[1])];
+    }
+    return [...PRECISION_DEFAULT_RANGE];
+  }
+
+  // Precision filter UI helpers: shared by the initUI wiring, bar
+  // drags and applySettingsToUI's restore
+
+  // Refilter + redraw over every loaded point, shared by every filter
+  // control (accuracy, altitude, precision, gradient window)
+  function refilterNow() {
+    applyAccuracyFilter();
+    redrawMap();
+  }
+
+  // Debounced for live thumb dragging; typed values commit via
+  // refilterNow (flush() is a no-op when nothing is pending)
+  const refilterDebounced = debounce(refilterNow, 250);
+
+  // Dual-ended range helpers, shared by the precision filter bars and
+  // the altitude gradient window. A thumb's centre sweeps the inner
+  // width (width minus the 16px thumb), so fill edges and tick marks
+  // align against that geometry, computed from each input's own min/max
+  // attributes so any bounds share the math.
+  function dualRangeFrac(container, value) {
+    const minInput = container.querySelector('.dual-range-min');
+    const span = Number(minInput.max) - Number(minInput.min) || 1;
+    return (value - Number(minInput.min)) / span;
+  }
+
+  function dualRangeOffsetPx(frac) {
+    return `calc(${PRECISION_THUMB_PX / 2}px + (100% - ${PRECISION_THUMB_PX}px) * ${frac})`;
+  }
+
+  function syncDualRange(container, min, max) {
+    container.querySelector('.dual-range-min').value = min;
+    container.querySelector('.dual-range-max').value = max;
+    const fill = container.querySelector('.dual-range-fill');
+    fill.style.left = dualRangeOffsetPx(dualRangeFrac(container, min));
+    fill.style.right = dualRangeOffsetPx(1 - dualRangeFrac(container, max));
+  }
+
+  // Thumb order is enforced by pushing: dragging one thumb past the
+  // other drags it along, so the whole range can be swept with either
+  // end. onCommit receives the ordered [min, max] after each input.
+  function wireDualRange(container, onCommit) {
+    const minInput = container.querySelector('.dual-range-min');
+    const maxInput = container.querySelector('.dual-range-max');
+    minInput.addEventListener('input', () => {
+      if (Number(minInput.value) > Number(maxInput.value)) {
+        maxInput.value = minInput.value;
+      }
+      onCommit(Number(minInput.value), Number(maxInput.value));
+    });
+    maxInput.addEventListener('input', () => {
+      if (Number(maxInput.value) < Number(minInput.value)) {
+        minInput.value = maxInput.value;
+      }
+      onCommit(Number(minInput.value), Number(maxInput.value));
+    });
+    container.addEventListener('change', () => refilterDebounced.flush());
+  }
+
+  function buildPrecisionTicks(container) {
+    const ticks = document.createElement('div');
+    ticks.className = 'dual-range-ticks';
+    ticks.setAttribute('aria-hidden', 'true');
+    for (let v = PRECISION_MIN; v <= PRECISION_MAX; v++) {
+      const tick = document.createElement('span');
+      tick.textContent = v === PRECISION_MAX ? '7+' : String(v);
+      tick.style.left = dualRangeOffsetPx(dualRangeFrac(container, v));
+      ticks.appendChild(tick);
+    }
+    // Sibling BELOW the bar - inside the bar container, in-flow
+    // content renders on top of the track and thumbs and gets in the
+    // way of dragging
+    container.insertAdjacentElement('afterend', ticks);
+  }
+
+  function syncPrecisionLabels() {
+    const fmt = (container) => {
+      const min = parseInt(container.querySelector('.dual-range-min').value, 10);
+      const max = parseInt(container.querySelector('.dual-range-max').value, 10);
+      return `${min} – ${max === PRECISION_MAX ? '7+' : max}`;
+    };
+    document.getElementById('latPrecisionValue').textContent = fmt(document.getElementById('latPrecisionSlider'));
+    document.getElementById('lonPrecisionValue').textContent = fmt(document.getElementById('lonPrecisionSlider'));
+  }
+
+  function syncPrecisionUI() {
+    const linked = getSetting('precisionLinked', true);
+    const lock = document.getElementById('precisionLink');
+    lock.querySelector('use').setAttribute('href', linked ? '#lock-icon' : '#unlock-icon');
+    lock.setAttribute('aria-pressed', String(linked));
+    const label = linked
+      ? 'Latitude and longitude share one range. Click to set them separately.'
+      : 'Latitude and longitude have separate ranges. Click to tie them together.';
+    lock.title = label;
+    lock.setAttribute('aria-label', label);
+    document.getElementById('latPrecisionTitle').textContent = linked
+      ? 'Precision'
+      : 'Latitude Precision';
+    document.getElementById('lonPrecisionGroup').hidden = linked;
+    syncPrecisionLabels();
+  }
+
+  function commitPrecision(axis, range) {
+    const ownBar = document.getElementById(axis === 'lat' ? 'latPrecisionSlider' : 'lonPrecisionSlider');
+    const otherBar = axis === 'lat' ? 'lonPrecisionSlider' : 'latPrecisionSlider';
+    const ownSetting = axis === 'lat' ? 'latitudePrecisionRange' : 'longitudePrecisionRange';
+    const otherSetting = axis === 'lat' ? 'longitudePrecisionRange' : 'latitudePrecisionRange';
+
+    // The dragged input already moved its own thumb; this also refreshes
+    // the fill span to match
+    syncDualRange(ownBar, range[0], range[1]);
+    saveSetting(ownSetting, [...range], [...PRECISION_DEFAULT_RANGE]);
+    if (getSetting('precisionLinked', true)) {
+      // Linked: both axes follow the one dragged bar
+      saveSetting(otherSetting, [...range], [...PRECISION_DEFAULT_RANGE]);
+      syncDualRange(document.getElementById(otherBar), range[0], range[1]);
+    }
+    syncPrecisionLabels();
+    refilterDebounced();
+  }
+
+  function wirePrecisionBar(container, axis) {
+    buildPrecisionTicks(container);
+    wireDualRange(container, (min, max) => commitPrecision(axis, [min, max]));
+  }
+
+  // Altitude gradient window: a dual range whose bounds pin to the
+  // loaded data's altitude range, committing straight to the
+  // altitudeMin/altitudeMax settings the gradient reads. Without data
+  // bounds, the defaults AND the saved window stay reachable.
+  function syncAltitudeGradient(boundLo, boundHi) {
+    const bar = document.getElementById('altitudeGradientSlider');
+    const lo = getSetting('altitudeMin', 0);
+    const hi = getSetting('altitudeMax', 1000);
+    const loBound = boundLo ?? Math.min(0, lo);
+    const hiBound = boundHi ?? Math.max(1000, hi);
+    bar.querySelector('.dual-range-min').min = loBound;
+    bar.querySelector('.dual-range-max').min = loBound;
+    bar.querySelector('.dual-range-min').max = hiBound;
+    bar.querySelector('.dual-range-max').max = hiBound;
+    // Values outside the bounds clamp to the nearest edge
+    const clampedLo = Math.min(Math.max(lo, loBound), hiBound);
+    const clampedHi = Math.min(Math.max(hi, loBound), hiBound);
+    syncDualRange(bar, clampedLo, clampedHi);
+    document.getElementById('altitudeGradientValue').textContent = `${clampedLo} – ${clampedHi}`;
+  }
+
   function applyAccuracyFilter() {
     const maxAccuracy = getSetting('accuracyMaxMeters', 0);
+    const minAltitude = getSetting('minAltitudeMeters', 0);
+    const [latMin, latMax] = getPrecisionRange('latitudePrecisionRange');
+    const [lonMin, lonMax] = getPrecisionRange('longitudePrecisionRange');
+    // Only the Max step caps nothing - "7 or more". Every other upper
+    // value is a hard cap: higher precision is discarded.
+    const latCapped = latMax < PRECISION_MAX;
+    const lonCapped = lonMax < PRECISION_MAX;
 
-    if (maxAccuracy === 0) {
-      state.data.filtered = state.data.raw;
-    } else {
-      state.data.filtered = state.data.raw.filter(point => {
-        return !point.acc || point.acc <= maxAccuracy;
-      });
-    }
+    state.data.filtered = state.data.raw.filter(point => {
+      // acc of 0/undefined means "no accuracy reported" - always kept
+      if (maxAccuracy !== 0 && point.acc && point.acc > maxAccuracy) return false;
+      // alt of non-number means "no altitude reported" - always kept,
+      // like unreported accuracy
+      if (minAltitude > 0 && typeof point.alt === 'number' && !Number.isNaN(point.alt) && point.alt < minAltitude) return false;
+      // The precision floor always applies - whole-number coordinates
+      // sit below every selectable minimum
+      const latDp = decimalPlaces(point.lat);
+      if (latDp < latMin || (latCapped && latDp > latMax)) return false;
+      const lonDp = decimalPlaces(point.lon);
+      if (lonDp < lonMin || (lonCapped && lonDp > lonMax)) return false;
+      return true;
+    });
 
     invalidateProjectedPointCache();
     updateStats();
@@ -3045,7 +3437,23 @@
   }
 
   function redrawMap() {
-    if (!state.map || state.data.filtered.length === 0) return;
+    if (!state.map) return;
+
+    // Filters can empty the dataset: still clear the layers, close any
+    // dangling point popup and zero the visible count - returning early
+    // here used to leave the previous (now filtered-out) points drawn
+    // and clickable-looking
+    if (state.data.filtered.length === 0) {
+      state.layers.points.clearLayers();
+      state.layers.lines.clearLayers();
+      removeHeatmap();
+      lineTracks = [];
+      lineSliceBounds = null;
+      pointSliceBounds = null;
+      state.map.closePopup();
+      document.getElementById('statVisible').textContent = '0';
+      return;
+    }
 
     state.layers.points.clearLayers();
     state.layers.lines.clearLayers();

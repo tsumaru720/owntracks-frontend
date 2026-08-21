@@ -41,16 +41,23 @@ jq -n '
     "APP_DISPLAY_POINTS_COLOR": ["display", "points", "color"],
     "APP_DISPLAY_POINTS_SIZE": ["display", "points", "size"],
     "APP_DISPLAY_POINTS_OPACITY": ["display", "points", "opacity"],
+    "APP_DISPLAY_POINTS_COLLAPSED": ["display", "points", "collapsed"],
 
     "APP_DISPLAY_LINES_SHOW": ["display", "lines", "show"],
     "APP_DISPLAY_LINES_COLOR": ["display", "lines", "color"],
     "APP_DISPLAY_LINES_WIDTH": ["display", "lines", "width"],
     "APP_DISPLAY_LINES_OPACITY": ["display", "lines", "opacity"],
+    "APP_DISPLAY_LINES_COLLAPSED": ["display", "lines", "collapsed"],
 
     "APP_DISPLAY_ACCURACY_MAXMETERS": ["display", "accuracy", "maxMeters"],
 
+    "APP_DISPLAY_PRECISION_LINKED": ["display", "precision", "linked"],
+    "APP_DISPLAY_PRECISION_LATITUDERANGE": ["display", "precision", "latitudeRange"],
+    "APP_DISPLAY_PRECISION_LONGITUDERANGE": ["display", "precision", "longitudeRange"],
+
     "APP_DISPLAY_ALTITUDE_MIN": ["display", "altitude", "min"],
     "APP_DISPLAY_ALTITUDE_MAX": ["display", "altitude", "max"],
+    "APP_DISPLAY_ALTITUDE_MINMETERS": ["display", "altitude", "minMeters"],
 
     "APP_DISPLAY_ALTITUDE_POINTS_ENABLED": ["display", "altitude", "points", "enabled"],
     "APP_DISPLAY_ALTITUDE_POINTS_LOWCOLOR": ["display", "altitude", "points", "lowColor"],
@@ -67,6 +74,7 @@ jq -n '
     "APP_DISPLAY_HEATMAP_MAX": ["display", "heatmap", "max"],
     "APP_DISPLAY_HEATMAP_MAXZOOM": ["display", "heatmap", "maxZoom"],
     "APP_DISPLAY_HEATMAP_ZOOMSCALING": ["display", "heatmap", "zoomScaling"],
+    "APP_DISPLAY_HEATMAP_COLLAPSED": ["display", "heatmap", "collapsed"],
 
     "APP_DISPLAY_HEATMAP_GRADIENT_MIDSTOP": ["display", "heatmap", "gradient", "midStop"],
     "APP_DISPLAY_HEATMAP_GRADIENT_LOWCOLOR": ["display", "heatmap", "gradient", "lowColor"],

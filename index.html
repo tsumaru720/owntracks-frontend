@@ -45,11 +45,19 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <!-- Shared reset icon for .setting-reset buttons (referenced via <use>) -->
+  <!-- Shared icons for .setting-reset buttons (referenced via <use>) -->
   <svg style="display:none" aria-hidden="true">
     <symbol id="reset-icon" viewBox="0 0 24 24">
       <polyline points="1 4 1 10 7 10" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
       <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="lock-icon" viewBox="0 0 24 24">
+      <rect x="3" y="11" width="18" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M7 11V7a5 5 0 0 1 10 0v4" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="unlock-icon" viewBox="0 0 24 24">
+      <rect x="3" y="11" width="18" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M7 11V7a5 5 0 0 1 9.9-1.4" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
     </symbol>
   </svg>
 
@@ -131,7 +139,12 @@
           Automatically zoom and pan map to show all loaded data points.
         </small>
 
-        <div class="display-option-group">
+        <div class="display-option-group sub-section">
+          <div class="sub-section-header" data-sub="displayPointsConfig">
+            <span class="sub-section-icon">▶</span>
+            Point Configuration
+          </div>
+          <div class="sub-section-content">
         <div class="form-group">
           <div class="setting-header-row">
             <label for="pointColor">Point Color</label>
@@ -158,9 +171,15 @@
           </div>
           <input type="number" id="pointOpacity" value="0.5" min="0" max="1" step="0.1">
         </div>
+          </div>
         </div>
 
-        <div class="display-option-group">
+        <div class="display-option-group sub-section">
+          <div class="sub-section-header" data-sub="displayLinesConfig">
+            <span class="sub-section-icon">▶</span>
+            Line Configuration
+          </div>
+          <div class="sub-section-content">
         <div class="form-group">
           <div class="setting-header-row">
             <label for="lineColor">Line Color</label>
@@ -187,9 +206,15 @@
           </div>
           <input type="number" id="lineOpacity" value="0.7" min="0" max="1" step="0.1">
         </div>
+          </div>
         </div>
 
-        <div class="display-option-group">
+        <div class="display-option-group sub-section">
+          <div class="sub-section-header" data-sub="displayHeatmapConfig">
+            <span class="sub-section-icon">▶</span>
+            Heatmap Configuration
+          </div>
+          <div class="sub-section-content">
         <div class="form-group">
           <div class="setting-header-row">
             <label for="heatmapRadius">Heatmap Radius</label>
@@ -315,6 +340,7 @@
             <input type="text" id="heatmapHighColor" value="#ff0000">
           </div>
         </div>
+          </div>
         </div>
       </div>
     </div>
@@ -327,14 +353,56 @@
       </h3>
       <div class="section-content">
         <div class="form-group">
-          <label for="accuracySlider">Max Accuracy (meters): <span id="accuracyValue">0</span></label>
+          <label for="accuracySlider">Max GPS Accuracy (meters): <span id="accuracyValue">0</span></label>
           <div class="slider-container">
-            <input type="range" id="accuracySlider" min="0" max="500" value="0" step="1">
+            <input type="range" id="accuracySlider" min="0" max="27" value="0" step="1">
           </div>
         </div>
 
         <small class="setting-hint snug">
-          0 = show all points. Hides points with GPS accuracy greater than this value.
+          0 = show all points. Accuracy is the device's own estimate of how far off its fix might be - hides points reporting more than this.
+        </small>
+
+        <div class="form-group">
+          <label for="altitudeSlider">Minimum Altitude (meters): <span id="altitudeValue">0</span></label>
+          <div class="slider-container">
+            <input type="range" id="altitudeSlider" min="0" max="19" value="0" step="1">
+          </div>
+        </div>
+
+        <small class="setting-hint snug">
+          0 = show all points. Hides points recorded below this altitude; points that don't report altitude are always shown.
+        </small>
+
+        <div class="form-group">
+          <div class="setting-header-row">
+            <label for="latPrecisionMin" id="latPrecisionTitle">Precision</label>
+            <button type="button" class="setting-reset" id="precisionLink" aria-pressed="true" title="Latitude and longitude share one range. Click to set them separately." aria-label="Latitude and longitude share one range. Click to set them separately.">
+              <svg width="12" height="12" aria-hidden="true"><use href="#lock-icon"/></svg>
+            </button>
+          </div>
+          <div class="precision-range-value" id="latPrecisionValue">1 – 7+</div>
+          <div class="dual-range" id="latPrecisionSlider">
+            <div class="dual-range-track"><div class="dual-range-fill"></div></div>
+            <input type="range" class="dual-range-min" id="latPrecisionMin" min="1" max="7" step="1" value="1" aria-label="Latitude precision minimum decimal places">
+            <input type="range" class="dual-range-max" id="latPrecisionMax" min="1" max="7" step="1" value="7" aria-label="Latitude precision maximum decimal places">
+          </div>
+        </div>
+
+        <div class="form-group" id="lonPrecisionGroup" hidden>
+          <div class="setting-header-row">
+            <label for="lonPrecisionMin" id="lonPrecisionTitle">Longitude Precision</label>
+          </div>
+          <div class="precision-range-value" id="lonPrecisionValue">1 – 7+</div>
+          <div class="dual-range" id="lonPrecisionSlider">
+            <div class="dual-range-track"><div class="dual-range-fill"></div></div>
+            <input type="range" class="dual-range-min" id="lonPrecisionMin" min="1" max="7" step="1" value="1" aria-label="Longitude precision minimum decimal places">
+            <input type="range" class="dual-range-max" id="lonPrecisionMax" min="1" max="7" step="1" value="7" aria-label="Longitude precision maximum decimal places">
+          </div>
+        </div>
+
+        <small class="setting-hint snug">
+          Shows only points whose saved coordinates carry this many decimal places (53.1 = 1, 53.4534562 = 7); 7+ includes anything with 7 or more, and coordinates with no decimals are always hidden. Unlike GPS accuracy above, precision is how exact the stored position itself is.
         </small>
       </div>
     </div>
@@ -347,14 +415,20 @@
       </h3>
       <div class="section-content">
         <div class="form-group">
-          <label for="altitudeMin">Min Altitude (m)</label>
-          <input type="number" id="altitudeMin" value="0" min="-500">
+          <div class="setting-header-row">
+            <label for="altitudeGradientMin">Altitude Range (m)</label>
+          </div>
+          <div class="precision-range-value" id="altitudeGradientValue">0 – 1000</div>
+          <div class="dual-range" id="altitudeGradientSlider">
+            <div class="dual-range-track"><div class="dual-range-fill"></div></div>
+            <input type="range" class="dual-range-min" id="altitudeGradientMin" min="0" max="1000" step="1" value="0" aria-label="Gradient minimum altitude">
+            <input type="range" class="dual-range-max" id="altitudeGradientMax" min="0" max="1000" step="1" value="1000" aria-label="Gradient maximum altitude">
+          </div>
         </div>
 
-        <div class="form-group">
-          <label for="altitudeMax">Max Altitude (m)</label>
-          <input type="number" id="altitudeMax" value="1000" min="0">
-        </div>
+        <small class="setting-hint snug">
+          The colour scale spans this window; it pins to the loaded data's altitude range and resets to its full span on each load.
+        </small>
 
         <div class="toggle-config-group">
           <div class="checkbox-group form-group">

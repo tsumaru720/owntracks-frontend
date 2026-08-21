@@ -128,12 +128,18 @@ It is recommended to view this document directly as the table is too wide for th
 | `APP_DISPLAY_POINTS_COLOR` | `display.points.color` | Default point color | No | `#3388ff` |
 | `APP_DISPLAY_POINTS_SIZE` | `display.points.size` | Default point size | No | `2` |
 | `APP_DISPLAY_POINTS_OPACITY` | `display.points.opacity` | Default point opacity | No | `0.5` |
+| `APP_DISPLAY_POINTS_COLLAPSED` | `display.points.collapsed` | Point Configuration dropdown collapsed by default | No | `true` |
 | `APP_DISPLAY_LINES_SHOW` | `display.lines.show` | Show lines by default | No | `true` |
 | `APP_DISPLAY_LINES_COLOR` | `display.lines.color` | Default line color | No | `#3388ff` |
 | `APP_DISPLAY_LINES_WIDTH` | `display.lines.width` | Default line width | No | `3` |
 | `APP_DISPLAY_LINES_OPACITY` | `display.lines.opacity` | Default line opacity | No | `0.7` |
+| `APP_DISPLAY_LINES_COLLAPSED` | `display.lines.collapsed` | Line Configuration dropdown collapsed by default | No | `true` |
 | `APP_DISPLAY_ACCURACY_MAXMETERS` | `display.accuracy.maxMeters` | Max GPS accuracy filter (0 = all) | No | `0` |
+| `APP_DISPLAY_PRECISION_LINKED` | `display.precision.linked` | Tie latitude/longitude to one precision range | No | `true` |
+| `APP_DISPLAY_PRECISION_LATITUDERANGE` | `display.precision.latitudeRange` | Latitude precision range `[min, max]` decimal places (max `7` = 7+) | No | `[1, 7]` |
+| `APP_DISPLAY_PRECISION_LONGITUDERANGE` | `display.precision.longitudeRange` | Longitude precision range `[min, max]` decimal places (max `7` = 7+) | No | `[1, 7]` |
 | `APP_DISPLAY_ALTITUDE_MIN` | `display.altitude.min` | Min altitude for gradient | No | `0` |
+| `APP_DISPLAY_ALTITUDE_MINMETERS` | `display.altitude.minMeters` | Minimum altitude filter (0 = all) | No | `0` |
 | `APP_DISPLAY_ALTITUDE_MAX` | `display.altitude.max` | Max altitude for gradient | No | `1000` |
 | `APP_DISPLAY_ALTITUDE_POINTS_ENABLED` | `display.altitude.points.enabled` | Enable altitude gradient on points | No | `false` |
 | `APP_DISPLAY_ALTITUDE_POINTS_LOWCOLOR` | `display.altitude.points.lowColor` | Low altitude color (points) | No | `#00ff00` |
@@ -148,6 +154,7 @@ It is recommended to view this document directly as the table is too wide for th
 | `APP_DISPLAY_HEATMAP_MAX` | `display.heatmap.max` | Heatmap saturation threshold (points to hottest colour) | No | `20` |
 | `APP_DISPLAY_HEATMAP_MAXZOOM` | `display.heatmap.maxZoom` | Max zoom for heatmap | No | `18` |
 | `APP_DISPLAY_HEATMAP_ZOOMSCALING` | `display.heatmap.zoomScaling` | Zoom-adjusted blob size | No | `false` |
+| `APP_DISPLAY_HEATMAP_COLLAPSED` | `display.heatmap.collapsed` | Heatmap Configuration dropdown collapsed by default | No | `true` |
 | `APP_DISPLAY_HEATMAP_GRADIENT_MIDSTOP` | `display.heatmap.gradient.midStop` | Position of the medium color in the ramp (0.1-0.9) | No | `0.6` |
 | `APP_DISPLAY_HEATMAP_GRADIENT_LOWCOLOR` | `display.heatmap.gradient.lowColor` | Heatmap low color | No | `#0000ff` |
 | `APP_DISPLAY_HEATMAP_GRADIENT_MIDCOLOR` | `display.heatmap.gradient.midColor` | Heatmap mid color | No | `#00ffff` |
@@ -206,6 +213,8 @@ services:
 
 ## Display Options
 
+The point, line, and heatmap settings each live behind their own collapsible dropdown (Point/Line/Heatmap Configuration). Dropdown state is remembered between sessions and can be defaulted via `display.points.collapsed`, `display.lines.collapsed`, and `display.heatmap.collapsed` (`true` = collapsed).
+
 ### Quick Actions Dock
 - Floating dock on the left edge of the map (slides along with the sidebar)
 - Recenter map on loaded data
@@ -223,7 +232,8 @@ services:
 ### Altitude Gradient
 - Color points or lines by altitude
 - Independent settings for points vs lines
-- Configurable min/max range and colors
+- The colour-scale range is a dual slider pinned to the loaded data's altitude range; it resets to the full span on each data load
+- Configurable colors
 
 ### Heatmap
 - Point density overlay (visibility via the quick actions dock)
@@ -231,8 +241,13 @@ services:
 - Custom gradient colors (low/medium/high)
 
 ### Accuracy Filter
-- Filter points by GPS accuracy (meters)
-- 0 = show all points
+- Filter points by GPS accuracy (meters) - the device's own estimate of its fix error
+- Filter points by minimum altitude (meters): only points recorded at or above the selected value survive; the slider's top stop is pinned to the loaded data's highest altitude
+- 0 = show all points on the accuracy and altitude sliders; points that don't report the value are always kept
+- The accuracy and altitude sliders use stepped scales (finer steps where values cluster) so small values are individually selectable; clicking the value number opens an editor for an exact value
+- Loading new data resets the accuracy and altitude filters to 0 (persisted)
+- Filter points by coordinate precision (decimal places of the stored lat/lon, e.g. 53.1 = 1, 53.4534562 = 7); the 7+ step includes anything with 7 or more, any other upper bound discards higher precision
+- Coordinates with no decimals are always hidden; precision defaults to 1–7+, a lock ties latitude and longitude to one shared range, unlocking gives each axis its own slider
 
 ### Statistics
 - Total/visible point counts, loaded time range, and accuracy and altitude ranges for the current selection

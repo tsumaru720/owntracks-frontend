@@ -492,11 +492,19 @@ body:not(.ui-ready) .sub-section-content {
 
 /* Visual grouping of point/line/heatmap settings in Display Options */
 .display-option-group {
-  margin-bottom: 30px;
+  margin-bottom: 10px;
 }
 
 .display-option-group:last-child {
   margin-bottom: 0;
+}
+
+/* The mode dropdowns reuse the sub-section header mechanics but sit at
+   the top of the section (not nested under a toggle), so no indent rail */
+.display-option-group.sub-section {
+  margin-left: 0;
+  padding-left: 0;
+  border-left: none;
 }
 
 /* Sub-collapsible sections; only ever appear inside a toggle-config-group */
@@ -863,6 +871,134 @@ body:not(.ui-ready) .sub-section-content {
   border-radius: 50%;
   background: var(--accent);
   cursor: pointer;
+}
+
+/* Current dual-range readout, on its own line below the title row so
+   the title never wraps around it */
+.precision-range-value {
+  font-size: 13px;
+  margin-bottom: 5px;
+}
+
+/* Stepped-slider value that opens an inline editor on click (the
+   stepped scale can't express every value) */
+.editable-value {
+  cursor: text;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+.value-edit-input {
+  width: 6ch;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--accent);
+  border-radius: 0;
+  padding: 0;
+  outline: none;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.value-edit-input::-webkit-outer-spin-button,
+.value-edit-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Dual-ended range (coordinate precision filter): two range inputs
+   overlaid on one shared track. The inputs themselves ignore pointer
+   events so clicks fall through to the sidebar; only the thumbs are
+   grabbable, keeping both ends draggable when they share a step */
+.dual-range {
+  position: relative;
+  height: 18px;
+}
+
+.dual-range-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 6px;
+  margin-top: -3px;
+  border-radius: 3px;
+}
+
+.light-mode .dual-range-track {
+  background: var(--border-light);
+}
+
+.dark-mode .dual-range-track {
+  background: var(--border-dark);
+}
+
+.dual-range-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 3px;
+  background: var(--accent);
+}
+
+.dual-range input[type="range"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  appearance: none;
+  background: transparent;
+  pointer-events: none;
+}
+
+.dual-range input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  pointer-events: auto;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+}
+
+.dual-range input[type="range"]::-moz-range-thumb {
+  pointer-events: auto;
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+}
+
+/* The dragged or focused input rises above its twin so the thumb
+   stays grabbable when both sit on the same step */
+.dual-range input[type="range"]:active,
+.dual-range input[type="range"]:focus-visible {
+  z-index: 2;
+}
+
+/* Step labels for a dual range - a sibling BELOW the bar (never inside
+   it, where in-flow content lands on top of the absolutely-positioned
+   track and thumbs). pointer-events off so the labels can't intercept
+   thumb drags; each label is centred under its thumb position (left
+   set from JS using the same thumb geometry) */
+.dual-range-ticks {
+  position: relative;
+  height: 13px;
+  margin-top: 4px;
+  font-size: 10px;
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.dual-range-ticks span {
+  position: absolute;
+  transform: translateX(-50%);
+  white-space: nowrap;
 }
 
 /* Setting header with an inline reset button - sits on the label row so

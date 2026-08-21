@@ -25,20 +25,28 @@
       "show": true,
       "color": "#3388ff",
       "size": 2,
-      "opacity": 0.5
+      "opacity": 0.5,
+      "collapsed": true
     },
     "lines": {
       "show": true,
       "color": "#3388ff",
       "width": 3,
-      "opacity": 0.7
+      "opacity": 0.7,
+      "collapsed": true
     },
     "accuracy": {
       "maxMeters": 0
     },
+    "precision": {
+      "linked": true,
+      "latitudeRange": [1, 7],
+      "longitudeRange": [1, 7]
+    },
     "altitude": {
       "min": 0,
       "max": 1000,
+      "minMeters": 0,
       "points": {
         "enabled": false,
         "lowColor": "#00ff00",
@@ -58,6 +66,7 @@
       "max": 20,
       "maxZoom": 18,
       "zoomScaling": false,
+      "collapsed": true,
       "gradient": {
         "midStop": 0.6,
         "lowColor": "#0000ff",
