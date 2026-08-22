@@ -1391,26 +1391,6 @@ body:not(.ui-ready) .sub-section-content {
   border-bottom-color: #454545;
 }
 
-.help-temp-badge {
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  padding: 1px 6px;
-  border-radius: 3px;
-  vertical-align: middle;
-  white-space: nowrap;
-}
-
-.light-mode .help-temp-badge {
-  background-color: #ffc107;
-  color: #212529;
-}
-
-.dark-mode .help-temp-badge {
-  background-color: rgba(255, 193, 7, 0.25);
-  color: #ffc107;
-}
-
 /* Map */
 #map {
   position: fixed;

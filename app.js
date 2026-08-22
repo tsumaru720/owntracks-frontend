@@ -41,7 +41,7 @@
   // ============================================================================
 
   function log(...args) {
-    if (getSetting('consoleLoggingEnabled', false)) {
+    if (setting('consoleLoggingEnabled')) {
       console.log(...args);
     }
   }
@@ -343,17 +343,70 @@
     return value;
   }
 
+  // Single source of default values for persisted settings (config files
+  // may still override via CONFIG_PATHS). Toggles the user drives from the
+  // dock are saved with a null default instead, so an explicit choice
+  // always wins over config-file values.
+  const SETTING_DEFAULTS = {
+    showPoints: true,
+    showLines: true,
+    heatmapEnabled: false,
+    satelliteEnabled: false,
+    pointColor: '#3388ff',
+    pointSize: 2,
+    pointOpacity: 0.5,
+    lineColor: '#3388ff',
+    lineWidth: 3,
+    lineOpacity: 0.7,
+    accuracyMaxMeters: 0,
+    minAltitudeMeters: 0,
+    precisionLinked: true,
+    altitudeEnabled: false,
+    altitudeLinesEnabled: false,
+    altitudeMin: 0,
+    altitudeMax: 1000,
+    altitudePointsLowColor: '#00ff00',
+    altitudePointsHighColor: '#ff0000',
+    altitudeLinesLowColor: '#00ff00',
+    altitudeLinesHighColor: '#ff0000',
+    heatmapRadius: 25,
+    heatmapBlur: 15,
+    heatmapMinOpacity: 0.05,
+    heatmapGradientMidStop: 0.6,
+    heatmapLowColor: '#0000ff',
+    heatmapMidColor: '#00ffff',
+    heatmapMidHighColor1: '#00ff00',
+    heatmapMidHighColor2: '#ffff00',
+    heatmapHighColor: '#ff0000',
+    heatmapMax: 20,
+    heatmapMaxZoom: 18,
+    heatmapZoomScaling: false,
+    storageEnabled: true,
+    autoFitToBounds: true,
+    consoleLoggingEnabled: false,
+    sidebarOpen: true,
+    datePreset: '30days',
+    fromDate: '',
+    toDate: '',
+    selectedUser: '',
+    selectedDevice: ''
+  };
+
+  function setting(key) {
+    return getSetting(key, SETTING_DEFAULTS[key]);
+  }
+
+  function setSetting(key, value) {
+    saveSetting(key, value, SETTING_DEFAULTS[key]);
+  }
+
   // ============================================================================
   // Map Initialization
   // ============================================================================
 
-  // simpleheat (bundled in leaflet-heat) colorises with a full-canvas
-  // getImageData/putImageData on every redraw - each pan/zoom end - but
-  // acquires the canvas context without willReadFrequently, so Chrome
-  // performs slow GPU readbacks and logs a warning per canvas. Prime the
-  // context with the readback hint before the plugin's constructor
-  // acquires it; its later plain getContext('2d') returns the same,
-  // already-hinted context.
+  // simpleheat colorises via full-canvas readbacks but acquires its context
+  // without willReadFrequently; priming the context first makes its later
+  // plain getContext return the same, already-hinted context
   const originalSimpleheat = window.simpleheat;
   if (typeof originalSimpleheat === 'function') {
     window.simpleheat = function (canvas) {
@@ -404,29 +457,18 @@
 
     updateTileLayer();
 
-    // Heatmap needs rebuilding after a zoom settles: its radius and blur
-    // are zoom-adjusted. Lines and points redraw themselves via their
-    // renderers' own moveend handling.
+    // Heatmap radius/blur are zoom-adjusted, so it needs rebuilding after a
+    // zoom settles; points/lines redraw via their renderers' own handling
     const rebuildHeatmapOnZoom = debounce(() => {
-      if (state.data.filtered.length === 0) return;
-      if (getSetting('heatmapEnabled', false)) {
+      if (state.data.filtered.length > 0 && setting('heatmapEnabled')) {
         drawHeatmap(state.data.filtered);
       }
     }, 150);
-    state.map.on('zoomend', () => {
-      if (state.data.filtered.length > 0) rebuildHeatmapOnZoom();
-    });
+    state.map.on('zoomend', rebuildHeatmapOnZoom);
 
-    state.layers.heatmap = null; // Will be created with zIndex: 200 when needed
-
-    // Batched point renderer (defined with the point rendering code below).
-    // Added before the line renderer so its canvas precedes the line canvas
-    // in the overlay pane - same stacking as when point markers were added
-    // before the first polyline.
+    // Point renderer added before the line renderer so its canvas stacks
+    // below the line canvas in the overlay pane
     state.layers.pointCloud = new PointCloudRenderer().addTo(state.map);
-
-    // Batched line renderer on its own canvas, so neither layer's redraw
-    // forces a pass over the other's canvas.
     state.layers.lineCloud = new LineCloudRenderer().addTo(state.map);
 
     // Add proximity click handler for easier point interaction
@@ -442,7 +484,7 @@
       }
     });
 
-    const satellite = getSetting('satelliteEnabled', false);
+    const satellite = setting('satelliteEnabled');
     // The class exempts satellite tiles (imagery + labels) from the
     // dark-mode invert filter so they render true-colour in either theme
     document.getElementById('map').classList.toggle('satellite-active', satellite);
@@ -663,23 +705,15 @@
     // Apply button
     document.getElementById('pickerApply').addEventListener('click', async () => {
       if (currentPickerInput) {
-        const year = pickerCurrentDate.getFullYear();
-        const month = String(pickerCurrentDate.getMonth() + 1).padStart(2, '0');
-        const day = String(pickerCurrentDate.getDate()).padStart(2, '0');
-
         // Dates are day-granular - there is no time component
-        const dateStr = `${year}-${month}-${day}`;
+        const dateStr = formatDateForInput(pickerCurrentDate);
         currentPickerInput.value = formatDisplayDate(pickerCurrentDate);
         currentPickerInput.dataset.value = dateStr;
 
-        if (currentPickerInput.id === 'fromDate') {
-          saveSetting('fromDate', dateStr, '');
-        } else {
-          saveSetting('toDate', dateStr, '');
-        }
+        setSetting(currentPickerInput.id === 'fromDate' ? 'fromDate' : 'toDate', dateStr);
 
         // Manually picked dates override any active preset
-        saveSetting('datePreset', 'custom', '30days');
+        setSetting('datePreset', 'custom');
         updateDatePresetButtons();
 
         await updateRefreshButton();
@@ -726,6 +760,12 @@
       const year = date.getFullYear();
       const month = date.getMonth();
 
+      // Saved input value as [y, m, d] numbers (legacy values may carry a
+      // time - the day part is all that matters), shared by all views
+      const selectedDate = currentPickerInput?.dataset.value;
+      const selectedParts = selectedDate ? selectedDate.split('T')[0].split('-').map(Number) : null;
+      const today = new Date();
+
       const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
                           'July', 'August', 'September', 'October', 'November', 'December'];
       const monthYearEl = document.querySelector('.date-picker-month-year');
@@ -765,9 +805,6 @@
         const startDay = firstDay.getDay();
         const totalDays = lastDay.getDate();
 
-        const today = new Date();
-        const selectedDate = currentPickerInput?.dataset.value;
-        const selectedParts = selectedDate ? selectedDate.split('T')[0].split('-').map(Number) : null;
         const currentPickerDay = pickerCurrentDate.getDate();
         const currentPickerMonth = pickerCurrentDate.getMonth();
         const currentPickerYear = pickerCurrentDate.getFullYear();
@@ -814,10 +851,6 @@
       } else if (pickerViewMode === 'months') {
         daysHeader.style.display = 'none';
 
-        const today = new Date();
-        const selectedDate = currentPickerInput?.dataset.value;
-        const selectedParts = selectedDate ? selectedDate.split('T')[0].split('-').map(Number) : null;
-
         let html = '';
         const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
                             'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -850,10 +883,6 @@
         });
       } else if (pickerViewMode === 'years') {
         daysHeader.style.display = 'none';
-
-        const today = new Date();
-        const selectedDate = currentPickerInput?.dataset.value;
-        const selectedParts = selectedDate ? selectedDate.split('T')[0].split('-').map(Number) : null;
 
         // Show 12 years centered around current year
         const startYear = Math.floor(year / 12) * 12;
@@ -895,17 +924,13 @@
 
     observer.observe(document.getElementById('sidebar'), { attributes: true, attributeFilter: ['class'] });
 
-    document.getElementById('fromDate').addEventListener('change', async (e) => {
-      saveSetting('fromDate', e.target.value, '');
-      saveSetting('datePreset', 'custom', '30days');
-      updateDatePresetButtons();
-      await updateRefreshButton();
-    });
-    document.getElementById('toDate').addEventListener('change', async (e) => {
-      saveSetting('toDate', e.target.value, '');
-      saveSetting('datePreset', 'custom', '30days');
-      updateDatePresetButtons();
-      await updateRefreshButton();
+    ['fromDate', 'toDate'].forEach(id => {
+      document.getElementById(id).addEventListener('change', async (e) => {
+        setSetting(id, e.target.value);
+        setSetting('datePreset', 'custom');
+        updateDatePresetButtons();
+        await updateRefreshButton();
+      });
     });
     document.getElementById('loadDataBtn').addEventListener('click', () => loadData());
     document.getElementById('refreshBtn').addEventListener('click', loadDataFromAPI);
@@ -916,9 +941,9 @@
         fitMapToBounds();
       }
     });
-    document.getElementById('qaPoints').addEventListener('click', () => toggleDisplaySetting('showPoints', true));
-    document.getElementById('qaLines').addEventListener('click', () => toggleDisplaySetting('showLines', true));
-    document.getElementById('qaHeatmap').addEventListener('click', () => toggleDisplaySetting('heatmapEnabled', false));
+    document.getElementById('qaPoints').addEventListener('click', () => toggleDisplaySetting('showPoints'));
+    document.getElementById('qaLines').addEventListener('click', () => toggleDisplaySetting('showLines'));
+    document.getElementById('qaHeatmap').addEventListener('click', () => toggleDisplaySetting('heatmapEnabled'));
     document.getElementById('qaSatellite').addEventListener('click', toggleSatelliteView);
 
     // Keyboard shortcuts + help overlay
@@ -932,7 +957,7 @@
 
     // Auto-fit to bounds
     document.getElementById('autoFitToBounds').addEventListener('change', (e) => {
-      saveSetting('autoFitToBounds', e.target.checked, true);
+      setSetting('autoFitToBounds', e.target.checked);
       if (e.target.checked && state.data.filtered.length > 0) {
         fitMapToBounds();
       } else if (!e.target.checked) {
@@ -942,22 +967,23 @@
     });
 
     // Setting-input wiring helpers. Colour pickers share the text input's
-    // id + "Picker"; setting keys match element ids
-    const bindSettingInput = (id, defaultValue, parse = parseFloat) => {
+    // id + "Picker"; setting keys match element ids; defaults come from
+    // SETTING_DEFAULTS
+    const bindSettingInput = (id, parse = parseFloat) => {
       document.getElementById(id).addEventListener('change', (e) => {
-        saveSetting(id, parse(e.target.value), defaultValue);
+        setSetting(id, parse(e.target.value));
         redrawMap();
       });
     };
 
-    const bindSettingCheckbox = (id, defaultValue, onChange = redrawMap) => {
+    const bindSettingCheckbox = (id, onChange = redrawMap) => {
       document.getElementById(id).addEventListener('change', (e) => {
-        saveSetting(id, e.target.checked, defaultValue);
+        setSetting(id, e.target.checked);
         onChange();
       });
     };
 
-    const bindSettingColor = (id, defaultValue) => {
+    const bindSettingColor = (id) => {
       const text = document.getElementById(id);
       const picker = document.getElementById(id + 'Picker');
       // 'input' fires continuously while dragging the colour wheel -
@@ -965,12 +991,12 @@
       const redrawDebounced = debounce(redrawMap, 200);
       text.addEventListener('change', (e) => {
         picker.value = e.target.value;
-        saveSetting(id, e.target.value, defaultValue);
+        setSetting(id, e.target.value);
         redrawMap();
       });
       picker.addEventListener('input', (e) => {
         text.value = e.target.value;
-        saveSetting(id, e.target.value, defaultValue);
+        setSetting(id, e.target.value);
         redrawDebounced();
       });
       // Colour selection committed - apply now if a redraw is pending
@@ -978,12 +1004,12 @@
     };
 
     // Display options
-    bindSettingColor('pointColor', '#3388ff');
-    bindSettingInput('pointSize', 2, parseInt);
-    bindSettingInput('pointOpacity', 0.5);
-    bindSettingColor('lineColor', '#3388ff');
-    bindSettingInput('lineWidth', 3, parseInt);
-    bindSettingInput('lineOpacity', 0.7);
+    bindSettingColor('pointColor');
+    bindSettingInput('pointSize', parseInt);
+    bindSettingInput('pointOpacity');
+    bindSettingColor('lineColor');
+    bindSettingInput('lineWidth', parseInt);
+    bindSettingInput('lineOpacity');
 
     // Accuracy + altitude filters: the label updates live while
     // dragging, but the filter + full redraw over every loaded point is
@@ -992,7 +1018,7 @@
     document.getElementById('accuracySlider').addEventListener('input', (e) => {
       const value = accuracyCtl.valueAt(parseInt(e.target.value, 10));
       document.getElementById('accuracyValue').textContent = value;
-      saveSetting('accuracyMaxMeters', value, 0);
+      setSetting('accuracyMaxMeters', value);
       refilterDebounced();
     });
     document.getElementById('accuracySlider').addEventListener('change', () => refilterDebounced.flush());
@@ -1000,7 +1026,7 @@
     document.getElementById('altitudeSlider').addEventListener('input', (e) => {
       const value = altitudeCtl.valueAt(parseInt(e.target.value, 10));
       document.getElementById('altitudeValue').textContent = value;
-      saveSetting('minAltitudeMeters', value, 0);
+      setSetting('minAltitudeMeters', value);
       refilterDebounced();
     });
     document.getElementById('altitudeSlider').addEventListener('change', () => refilterDebounced.flush());
@@ -1008,12 +1034,12 @@
     // Clicking a meter filter's value opens an inline editor for an
     // exact number (the stepped scale can't express every value)
     wireSteppedValueEdit('accuracyValue', (v) => {
-      saveSetting('accuracyMaxMeters', v, 0);
+      setSetting('accuracyMaxMeters', v);
       accuracyCtl.position(v);
       refilterNow();
     });
     wireSteppedValueEdit('altitudeValue', (v) => {
-      saveSetting('minAltitudeMeters', v, 0);
+      setSetting('minAltitudeMeters', v);
       altitudeCtl.position(v);
       refilterNow();
     });
@@ -1024,8 +1050,8 @@
     wirePrecisionBar(document.getElementById('lonPrecisionSlider'), 'lon');
 
     document.getElementById('precisionLink').addEventListener('click', () => {
-      const linked = !getSetting('precisionLinked', true);
-      saveSetting('precisionLinked', linked, true);
+      const linked = !setting('precisionLinked');
+      setSetting('precisionLinked', linked);
       if (linked) {
         // Re-tying adopts the latitude range (the bar that stays
         // visible) for both axes
@@ -1038,36 +1064,35 @@
     });
 
     // Altitude gradient: enable checkboxes and colour pickers unchanged;
-    // the old min/max number inputs are now a dual range pinned to the
-    // loaded data (resetAltitudeGradientToData), writing the same
-    // altitudeMin/altitudeMax settings
-    bindSettingCheckbox('altitudeEnabled', false);
+    // the min/max window is a dual range pinned to the loaded data
+    // (resetAltitudeGradientToData), writing altitudeMin/altitudeMax
+    bindSettingCheckbox('altitudeEnabled');
     wireDualRange(document.getElementById('altitudeGradientSlider'), (min, max) => {
-      saveSetting('altitudeMin', min, 0);
-      saveSetting('altitudeMax', max, 1000);
+      setSetting('altitudeMin', min);
+      setSetting('altitudeMax', max);
       document.getElementById('altitudeGradientValue').textContent = `${min} - ${max}`;
       refilterDebounced();
     });
-    bindSettingColor('altitudePointsLowColor', '#00ff00');
-    bindSettingColor('altitudePointsHighColor', '#ff0000');
-    bindSettingCheckbox('altitudeLinesEnabled', false);
-    bindSettingColor('altitudeLinesLowColor', '#00ff00');
-    bindSettingColor('altitudeLinesHighColor', '#ff0000');
+    bindSettingColor('altitudePointsLowColor');
+    bindSettingColor('altitudePointsHighColor');
+    bindSettingCheckbox('altitudeLinesEnabled');
+    bindSettingColor('altitudeLinesLowColor');
+    bindSettingColor('altitudeLinesHighColor');
 
     // Heatmap
-    bindSettingInput('heatmapRadius', 25, parseInt);
-    bindSettingInput('heatmapBlur', 15, parseInt);
-    bindSettingInput('heatmapMinOpacity', 0.05);
-    bindSettingInput('heatmapMax', 20, parseInt);
-    bindSettingInput('heatmapMaxZoom', 18, parseInt);
-    bindSettingCheckbox('heatmapZoomScaling', false);
+    bindSettingInput('heatmapRadius', parseInt);
+    bindSettingInput('heatmapBlur', parseInt);
+    bindSettingInput('heatmapMinOpacity');
+    bindSettingInput('heatmapMax', parseInt);
+    bindSettingInput('heatmapMaxZoom', parseInt);
+    bindSettingCheckbox('heatmapZoomScaling');
 
     // Mid-stop slider: the label tracks the thumb live, the heatmap
     // rebuild is debounced while dragging and flushed on release
     const midStopRedraw = debounce(redrawMap, 200);
     document.getElementById('heatmapGradientMidStop').addEventListener('input', (e) => {
       document.getElementById('heatmapGradientMidStopValue').textContent = e.target.value;
-      saveSetting('heatmapGradientMidStop', parseFloat(e.target.value), 0.6);
+      setSetting('heatmapGradientMidStop', parseFloat(e.target.value));
       midStopRedraw();
     });
     document.getElementById('heatmapGradientMidStop').addEventListener('change', () => midStopRedraw.flush());
@@ -1093,22 +1118,20 @@
       });
     });
 
-    bindSettingColor('heatmapLowColor', '#0000ff');
-    bindSettingColor('heatmapMidColor', '#00ffff');
-    bindSettingColor('heatmapMidHighColor1', '#00ff00');
-    bindSettingColor('heatmapMidHighColor2', '#ffff00');
-    bindSettingColor('heatmapHighColor', '#ff0000');
+    bindSettingColor('heatmapLowColor');
+    bindSettingColor('heatmapMidColor');
+    bindSettingColor('heatmapMidHighColor1');
+    bindSettingColor('heatmapMidHighColor2');
+    bindSettingColor('heatmapHighColor');
 
     // Storage (refresh button state depends on the cache)
-    bindSettingCheckbox('storageEnabled', true, () => updateRefreshButton());
+    bindSettingCheckbox('storageEnabled', () => updateRefreshButton());
 
     // Dark mode toggle
     document.getElementById('darkModeToggle').addEventListener('click', () => {
-      const currentMode = getEffectiveDarkMode();
-
-      // Explicitly save the opposite preference, overriding system preference
-      state.settings.darkMode = !currentMode;
-      localStorage.setItem('owntracks_settings', JSON.stringify(state.settings));
+      // Save the opposite preference, overriding the system preference
+      // (null default: an explicit choice always wins)
+      saveSetting('darkMode', !getEffectiveDarkMode(), null);
 
       applyTheme();
       updateDarkModeToggle();
@@ -1222,77 +1245,49 @@
     });
 
     // Console logging (no redraw needed)
-    bindSettingCheckbox('consoleLoggingEnabled', false, () => {});
+    bindSettingCheckbox('consoleLoggingEnabled', () => {});
 
-    // Save map position/zoom when user manually changes the map (only when auto-fit is disabled)
-    state.map.on('moveend', saveMapPosition);
-    state.map.on('zoomend', saveMapPosition);
-
-    state.map.on('moveend', updateViewportStats);
-    state.map.on('zoomend', updateViewportStats);
+    // Save map position/zoom on manual map changes (only when auto-fit is
+    // disabled); keep the viewport point count current
+    state.map.on('moveend zoomend', saveMapPosition);
+    state.map.on('moveend zoomend', updateViewportStats);
 
     // Apply saved settings to UI
     applySettingsToUI();
   }
 
   async function applySettingsToUI() {
-    // Value inputs: [id, default] - setting key always matches the element id
-    const valueInputs = [
-      ['pointSize', 2],
-      ['pointOpacity', 0.5],
-      ['lineWidth', 3],
-      ['lineOpacity', 0.7],
-      ['heatmapRadius', 25],
-      ['heatmapBlur', 15],
-      ['heatmapMinOpacity', 0.05],
-      ['heatmapMax', 20],
-      ['heatmapMaxZoom', 18]
-    ];
-    valueInputs.forEach(([id, def]) => {
-      document.getElementById(id).value = getSetting(id, def);
+    // Setting keys always match element ids; defaults come from
+    // SETTING_DEFAULTS
+    ['pointSize', 'pointOpacity', 'lineWidth', 'lineOpacity',
+     'heatmapRadius', 'heatmapBlur', 'heatmapMinOpacity', 'heatmapMax',
+     'heatmapMaxZoom'].forEach(id => {
+      document.getElementById(id).value = setting(id);
     });
 
     // Range sliders also mirror their value into the label span
-    const midStop = getSetting('heatmapGradientMidStop', 0.6);
+    const midStop = setting('heatmapGradientMidStop');
     document.getElementById('heatmapGradientMidStop').value = midStop;
     document.getElementById('heatmapGradientMidStopValue').textContent = midStop;
 
     // Colour pairs: the picker input shares the setting id + "Picker"
-    const colorInputs = {
-      pointColor: '#3388ff',
-      lineColor: '#3388ff',
-      altitudePointsLowColor: '#00ff00',
-      altitudePointsHighColor: '#ff0000',
-      altitudeLinesLowColor: '#00ff00',
-      altitudeLinesHighColor: '#ff0000',
-      heatmapLowColor: '#0000ff',
-      heatmapMidColor: '#00ffff',
-      heatmapMidHighColor1: '#00ff00',
-      heatmapMidHighColor2: '#ffff00',
-      heatmapHighColor: '#ff0000'
-    };
-    Object.entries(colorInputs).forEach(([id, def]) => {
-      const value = getSetting(id, def);
+    ['pointColor', 'lineColor', 'altitudePointsLowColor', 'altitudePointsHighColor',
+     'altitudeLinesLowColor', 'altitudeLinesHighColor', 'heatmapLowColor',
+     'heatmapMidColor', 'heatmapMidHighColor1', 'heatmapMidHighColor2',
+     'heatmapHighColor'].forEach(id => {
+      const value = setting(id);
       document.getElementById(id).value = value;
       document.getElementById(id + 'Picker').value = value;
     });
 
-    // Checkboxes: [id, default]
-    const checkboxes = [
-      ['altitudeEnabled', false],
-      ['altitudeLinesEnabled', false],
-      ['heatmapZoomScaling', false],
-      ['storageEnabled', true],
-      ['autoFitToBounds', true],
-      ['consoleLoggingEnabled', false]
-    ];
-    checkboxes.forEach(([id, def]) => {
-      document.getElementById(id).checked = getSetting(id, def);
+    ['altitudeEnabled', 'altitudeLinesEnabled', 'heatmapZoomScaling',
+     'storageEnabled', 'autoFitToBounds', 'consoleLoggingEnabled'].forEach(id => {
+      document.getElementById(id).checked = setting(id);
     });
 
     // Accuracy + altitude filters (steps are rebuilt on data load)
-    accuracyCtl.rebuild(buildAccuracySteps(0), getSetting('accuracyMaxMeters', 0));
-    altitudeCtl.rebuild(buildAltitudeSteps(0), getSetting('minAltitudeMeters', 0));
+    accuracyCtl.rebuild(buildAccuracySteps(0), setting('accuracyMaxMeters'));
+    altitudeCtl.rebuild(buildAltitudeSteps(0), setting('minAltitudeMeters'));
 
     // Altitude gradient window (bounds pin to the data on load)
     syncAltitudeGradient();
@@ -1312,8 +1307,8 @@
 
   // Dock-driven display toggles, persisted with a null default so an
   // explicit toggle always wins over config-file values
-  function toggleDisplaySetting(key, defaultValue) {
-    const newValue = !getSetting(key, defaultValue);
+  function toggleDisplaySetting(key) {
+    const newValue = !setting(key);
     saveSetting(key, newValue, null);
     // A proximity popup describes a point; don't leave it dangling over
     // the map once the points are hidden
@@ -1325,26 +1320,22 @@
   }
 
   function updateQuickActionsBar() {
-    const points = getSetting('showPoints', true);
-    const lines = getSetting('showLines', true);
-    const heatmap = getSetting('heatmapEnabled', false);
-    const satellite = getSetting('satelliteEnabled', false);
-
-    document.getElementById('qaPoints').classList.toggle('active', points);
-    document.getElementById('qaPoints').setAttribute('aria-pressed', points);
-    document.getElementById('qaLines').classList.toggle('active', lines);
-    document.getElementById('qaLines').setAttribute('aria-pressed', lines);
-    document.getElementById('qaHeatmap').classList.toggle('active', heatmap);
-    document.getElementById('qaHeatmap').setAttribute('aria-pressed', heatmap);
-    document.getElementById('qaSatellite').classList.toggle('active', satellite);
-    document.getElementById('qaSatellite').setAttribute('aria-pressed', satellite);
+    const toggle = (id, active) => {
+      const btn = document.getElementById(id);
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-pressed', active);
+    };
+    toggle('qaPoints', setting('showPoints'));
+    toggle('qaLines', setting('showLines'));
+    toggle('qaHeatmap', setting('heatmapEnabled'));
+    toggle('qaSatellite', setting('satelliteEnabled'));
   }
 
   // Tile-server toggle - persisted with a null default (like the dock
   // toggles) so an explicit choice always wins over config-file values.
   // Only the tile layers change; no data redraw needed.
   function toggleSatelliteView() {
-    saveSetting('satelliteEnabled', !getSetting('satelliteEnabled', false), null);
+    saveSetting('satelliteEnabled', !setting('satelliteEnabled'), null);
     updateTileLayer();
     updateQuickActionsBar();
   }
@@ -1403,33 +1394,28 @@
       return;
     }
 
-    switch (e.key) {
+    switch (e.key.toLowerCase()) {
       case '?':
         e.preventDefault();
         openHelpOverlay();
         break;
       case 'h':
-      case 'H':
         e.preventDefault();
-        toggleDisplaySetting('heatmapEnabled', false);
+        toggleDisplaySetting('heatmapEnabled');
         break;
       case 'p':
-      case 'P':
         e.preventDefault();
-        toggleDisplaySetting('showPoints', true);
+        toggleDisplaySetting('showPoints');
         break;
       case 'l':
-      case 'L':
         e.preventDefault();
-        toggleDisplaySetting('showLines', true);
+        toggleDisplaySetting('showLines');
         break;
       case 'm':
-      case 'M':
         e.preventDefault();
         toggleSatelliteView();
         break;
       case 'f':
-      case 'F':
         e.preventDefault();
         if (state.data.filtered.length > 0) fitMapToBounds();
         break;
@@ -1446,7 +1432,7 @@
     saveSetting('sidebarOpen', state.sidebarOpen, true);
 
     // Re-fit (if auto-fit on) once the sidebar transition has started
-    if (getSetting('autoFitToBounds', true) && state.data.filtered.length > 0) {
+    if (setting('autoFitToBounds') && state.data.filtered.length > 0) {
       setTimeout(() => {
         fitMapToBounds();
       }, 50);
@@ -1456,7 +1442,7 @@
   function saveMapPosition(force) {
     // Only save manual positions; forced saves record a completed auto-fit
     // so turning auto-fit off later keeps the current view
-    if (!force && getSetting('autoFitToBounds', true)) {
+    if (!force && setting('autoFitToBounds')) {
       return;
     }
 
@@ -1495,7 +1481,7 @@
   }
 
   function restoreSidebarState() {
-    const wasOpen = getSetting('sidebarOpen', true);
+    const wasOpen = setting('sidebarOpen');
     const sidebar = document.getElementById('sidebar');
 
     if (wasOpen) {
@@ -1512,41 +1498,26 @@
     }, 50);
   }
 
+  // Re-measure an expanded section/sub-section's max-height with
+  // transitions off: measure uncapped, then pin to the natural height
+  function remeasureContent(content) {
+    content.style.transition = 'none';
+    content.style.maxHeight = 'none';
+    void content.offsetHeight;
+
+    const height = content.scrollHeight;
+    content.style.transition = '';
+    if (height > 0) {
+      content.style.maxHeight = `${height}px`;
+    }
+  }
+
   function recalculateAllSectionHeights() {
-    // Recalculate all expanded section heights
-    document.querySelectorAll('.section-toggle:not(.collapsed)').forEach(toggle => {
-      const content = toggle.nextElementSibling;
-      if (content) {
-        content.style.transition = 'none';
-        content.style.maxHeight = 'none';
-
-        void content.offsetHeight;
-
-        const height = content.scrollHeight;
-
-        content.style.transition = '';
-        if (height > 0) {
-          content.style.maxHeight = `${height}px`;
-        }
-      }
-    });
-
-    // Recalculate all expanded sub-section heights
-    document.querySelectorAll('.sub-section-header:not(.collapsed)').forEach(header => {
-      const content = header.nextElementSibling;
-      if (content) {
-        content.style.transition = 'none';
-        content.style.maxHeight = 'none';
-        void content.offsetHeight;
-
-        const height = content.scrollHeight;
-
-        content.style.transition = '';
-        if (height > 0) {
-          content.style.maxHeight = `${height}px`;
-        }
-      }
-    });
+    document.querySelectorAll('.section-toggle:not(.collapsed), .sub-section-header:not(.collapsed)')
+      .forEach(controller => {
+        const content = controller.nextElementSibling;
+        if (content) remeasureContent(content);
+      });
   }
 
   // Expand from 0 to natural height: measure uncapped with transitions
@@ -1641,17 +1612,7 @@
 
       const remeasureParent = () => {
         const parentContent = expandedParentContent();
-        if (!parentContent) return;
-
-        parentContent.style.transition = 'none';
-        parentContent.style.maxHeight = 'none';
-        void parentContent.offsetHeight; // Force reflow
-
-        const height = parentContent.scrollHeight;
-        parentContent.style.transition = '';
-        if (height > 0) {
-          parentContent.style.maxHeight = `${height}px`;
-        }
+        if (parentContent) remeasureContent(parentContent);
       };
 
       header.addEventListener('click', () => {
@@ -1679,23 +1640,15 @@
     });
 
     // Section max-heights are measured on demand (scrollHeight), so any
-    // content that grows after measurement - cache status text wrapping to
-    // another line, a longer Load Data label - stays clipped by the stale
-    // cap unless something re-measures. Watching each section's children
-    // (rather than the section itself) catches those growths as they
-    // happen, and never fires for the collapse/expand animations, which
-    // resize the section without moving its children.
+    // content that grows after measurement stays clipped by the stale cap
+    // unless something re-measures. Watching each section's children
+    // catches those growths, and never fires for the collapse/expand
+    // animations, which resize the section without moving its children.
     const unclipSectionContent = (content, controller) => {
       if (!content || !controller || controller.classList.contains('collapsed')) return;
       const cap = parseFloat(content.style.maxHeight);
       if (Number.isNaN(cap) || content.scrollHeight <= cap) return;
-
-      content.style.transition = 'none';
-      content.style.maxHeight = 'none';
-      void content.offsetHeight;
-      const height = content.scrollHeight;
-      content.style.transition = '';
-      if (height > 0) content.style.maxHeight = `${height}px`;
+      remeasureContent(content);
     };
 
     const contentResizeObserver = new ResizeObserver(entries => {
@@ -1719,23 +1672,15 @@
   // Theme Management
   // ============================================================================
 
+  // state.settings mirrors localStorage's owntracks_settings (kept in sync
+  // by every mutation) and is populated by loadSettings() before any theme
+  // code runs
   function getEffectiveDarkMode() {
-    const saved = localStorage.getItem('owntracks_settings');
-    try {
-      const settings = JSON.parse(saved || '{}');
-      // If user has explicitly saved a darkMode preference, use it
-      if (typeof settings.darkMode === 'boolean') {
-        return settings.darkMode;
-      }
-    } catch (e) {
-      logWarn('Failed to parse saved settings:', e);
+    if (typeof state.settings.darkMode === 'boolean') {
+      return state.settings.darkMode;
     }
-
-    // Otherwise, use system preference
-    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-      return true;
-    }
-    return false;
+    // No explicit preference - follow the system
+    return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
   }
 
   function applyTheme() {
@@ -1762,17 +1707,10 @@
   function initSystemThemeListener() {
     if (!window.matchMedia) return;
 
-    const darkModeQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    darkModeQuery.addEventListener('change', () => {
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
       // Only reapply if user hasn't explicitly set a theme preference
-      const saved = localStorage.getItem('owntracks_settings');
-      try {
-        const settings = JSON.parse(saved || '{}');
-        if (typeof settings.darkMode !== 'boolean') {
-          applyTheme();
-        }
-      } catch (e) {
-        logWarn('Failed to parse saved settings:', e);
+      if (typeof state.settings.darkMode !== 'boolean') {
+        applyTheme();
       }
     });
   }
@@ -1782,11 +1720,11 @@
   // ============================================================================
 
   async function setDefaultDates() {
-    const preset = getSetting('datePreset', '30days');
+    const preset = setting('datePreset');
 
     if (preset === 'custom') {
-      const savedFrom = getSetting('fromDate', '');
-      const savedTo = getSetting('toDate', '');
+      const savedFrom = setting('fromDate');
+      const savedTo = setting('toDate');
       if (savedFrom && savedTo) {
         const fromInput = document.getElementById('fromDate');
         const toInput = document.getElementById('toDate');
@@ -1854,21 +1792,17 @@
 
   // UTC timestamp -> local YYYY-MM-DD, used for cache keys (user's timezone)
   function utcToLocalDateString(utcTimestamp) {
-    const date = new Date(utcTimestamp * 1000);
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    const result = `${year}-${month}-${day}`;
+    const result = formatDateForInput(new Date(utcTimestamp * 1000));
     // Hot per-point call path - the debug string (incl. toISOString) is
     // only built when logging is actually enabled
-    if (getSetting('consoleLoggingEnabled', false)) {
-      log(`[Date Debug] UTC timestamp ${utcTimestamp} (${date.toISOString()}) -> Local date: ${result}`);
+    if (setting('consoleLoggingEnabled')) {
+      log(`[Date Debug] UTC timestamp ${utcTimestamp} -> Local date: ${result}`);
     }
     return result;
   }
 
   function getDateRange() {
-    const preset = getSetting('datePreset', '30days');
+    const preset = setting('datePreset');
 
     // Active presets re-resolve now (a page left open across midnight never
     // queries a stale "today"); inputs are synced to match
@@ -1958,7 +1892,7 @@
   }
 
   function updateDatePresetButtons() {
-    const active = getSetting('datePreset', '30days');
+    const active = setting('datePreset');
     document.querySelectorAll('.quick-range').forEach(button => {
       button.classList.toggle('active', button.dataset.preset === active);
     });
@@ -1968,7 +1902,7 @@
     document.querySelectorAll('.quick-range').forEach(button => {
       button.addEventListener('click', async () => {
         const preset = button.dataset.preset;
-        saveSetting('datePreset', preset, '30days');
+        setSetting('datePreset', preset);
         const { from, to } = resolveDatePreset(preset);
         setDateInputs(from, to);
         updateDatePresetButtons();
@@ -2022,6 +1956,29 @@
     }
   }
 
+  // Populate a user/device dropdown: "-" placeholder, optional "All ..."
+  // sentinel option, then one option per item
+  function fillSelect(select, items, allLabel) {
+    select.innerHTML = '';
+    const add = (value, text) => {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = text;
+      select.appendChild(option);
+    };
+    add('', '-');
+    if (allLabel) add(ALL_SELECTOR, allLabel);
+    items.forEach(item => add(item, item));
+  }
+
+  // Selection priority: saved value > config default > the only item > none
+  function pickSelection(saved, configDefault, items) {
+    if (saved && (saved === ALL_SELECTOR || items.includes(saved))) return saved;
+    if (configDefault && items.includes(configDefault)) return configDefault;
+    if (items.length === 1) return items[0];
+    return '';
+  }
+
   async function fetchUsersAndDevices() {
     clearHeaderError();
     try {
@@ -2041,42 +1998,11 @@
       const usersData = await response.json();
       state.data.users = usersData.results || usersData.result || [];
 
-      // Populate user dropdown: "-" placeholder, "All Users", then each user
       const userSelect = document.getElementById('userSelect');
-      userSelect.innerHTML = '';
+      fillSelect(userSelect, state.data.users, 'All Users');
 
-      const userPlaceholder = document.createElement('option');
-      userPlaceholder.value = '';
-      userPlaceholder.textContent = '-';
-      userSelect.appendChild(userPlaceholder);
-
-      const allUsersOption = document.createElement('option');
-      allUsersOption.value = ALL_SELECTOR;
-      allUsersOption.textContent = 'All Users';
-      userSelect.appendChild(allUsersOption);
-
-      state.data.users.forEach(user => {
-        const option = document.createElement('option');
-        option.value = user;
-        option.textContent = user;
-        userSelect.appendChild(option);
-      });
-
-      // Pick the user: saved selection > config default > the only user > none
-      const savedUser = getSetting('selectedUser', '');
-      const defaultUser = window.CONFIG.defaults?.user;
-      let userToSelect = '';
-
-      if (savedUser === ALL_SELECTOR || (savedUser && state.data.users.includes(savedUser))) {
-        userToSelect = savedUser;
-      } else if (defaultUser && state.data.users.includes(defaultUser)) {
-        userToSelect = defaultUser;
-      } else if (state.data.users.length === 1) {
-        userToSelect = state.data.users[0];
-      }
-
-      userSelect.value = userToSelect;
       // No saveSetting here - only explicit user changes are persisted
+      userSelect.value = pickSelection(setting('selectedUser'), window.CONFIG.defaults?.user, state.data.users);
 
       // Populate the device dropdown for whichever user is now selected
       await updateDeviceSelect();
@@ -2097,11 +2023,7 @@
       hideLoading();
 
     } catch (error) {
-      showLoadingError('Failed to load users: ' + error.message);
-      setTimeout(() => {
-        hideLoading();
-        showError('Failed to load users: ' + error.message);
-      }, 3000);
+      reportLoadError('Failed to load users: ' + error.message);
     }
   }
 
@@ -2123,10 +2045,9 @@
     return devices;
   }
 
-  // Repopulate the device dropdown for the selected user. Selection
-  // priority: saved device > config default > the only device > "-". With
-  // "All Users" the dropdown hides (treated as "All Devices") but every
-  // user's device list is still fetched for "Load Data".
+  // Repopulate the device dropdown for the selected user. With "All Users"
+  // the dropdown hides (treated as "All Devices") but every user's device
+  // list is still fetched for "Load Data".
   async function updateDeviceSelect() {
     clearHeaderError();
     const userSelect = document.getElementById('userSelect');
@@ -2149,12 +2070,7 @@
 
     // No user selected - devices can't be known yet
     if (!user) {
-      deviceSelect.innerHTML = '';
-      const placeholder = document.createElement('option');
-      placeholder.value = '';
-      placeholder.textContent = '-';
-      deviceSelect.appendChild(placeholder);
-      deviceSelect.value = '';
+      fillSelect(deviceSelect, []);
       recalcHeights();
       return;
     }
@@ -2174,77 +2090,31 @@
         });
 
         // Dropdown stays hidden - just keep it consistent with "All Devices"
-        deviceSelect.innerHTML = '';
-        const placeholder = document.createElement('option');
-        placeholder.value = '';
-        placeholder.textContent = '-';
-        deviceSelect.appendChild(placeholder);
-        const allDevicesOption = document.createElement('option');
-        allDevicesOption.value = ALL_SELECTOR;
-        allDevicesOption.textContent = 'All Devices';
-        deviceSelect.appendChild(allDevicesOption);
+        fillSelect(deviceSelect, [], 'All Devices');
         deviceSelect.value = ALL_SELECTOR;
       } else {
         showLoading(`Loading devices for ${user}...`);
         const devices = await fetchDevicesForUser(user);
+        fillSelect(deviceSelect, devices, 'All Devices');
 
-        // Populate device dropdown: "-" placeholder, "All Devices", then each device
-        deviceSelect.innerHTML = '';
-
-        const devicePlaceholder = document.createElement('option');
-        devicePlaceholder.value = '';
-        devicePlaceholder.textContent = '-';
-        deviceSelect.appendChild(devicePlaceholder);
-
-        const allDevicesOption = document.createElement('option');
-        allDevicesOption.value = ALL_SELECTOR;
-        allDevicesOption.textContent = 'All Devices';
-        deviceSelect.appendChild(allDevicesOption);
-
-        devices.forEach(device => {
-          const option = document.createElement('option');
-          option.value = device;
-          option.textContent = device;
-          deviceSelect.appendChild(option);
-        });
-
-        const savedDevice = getSetting('selectedDevice', '');
-        const defaultDevice = window.CONFIG.defaults?.device;
-        let deviceToSelect = '';
-
-        if (savedDevice === ALL_SELECTOR || (savedDevice && devices.includes(savedDevice))) {
-          deviceToSelect = savedDevice;
-        } else if (defaultDevice && devices.includes(defaultDevice)) {
-          deviceToSelect = defaultDevice;
-        } else if (devices.length === 1) {
-          deviceToSelect = devices[0];
-        }
-
-        deviceSelect.value = deviceToSelect;
         // No saveSetting here: only explicit user changes are persisted
+        deviceSelect.value = pickSelection(setting('selectedDevice'), window.CONFIG.defaults?.device, devices);
       }
 
       recalcHeights();
       hideLoading();
 
     } catch (error) {
-      showLoadingError('Failed to load devices: ' + error.message);
-      setTimeout(() => {
-        hideLoading();
-        showError('Failed to load devices: ' + error.message);
-      }, 3000);
+      reportLoadError('Failed to load devices: ' + error.message);
     }
   }
 
-  // Page-load restore: if any combo of the current selection has cached
-  // days inside the requested date range, render that data straight from the
-  // cache - no API traffic. Uncached days and the current day's points
-  // stay blank until an explicit Load Data (which fetches the current day
-  // fresh and fills the gaps) or Refresh from API. Only runs once at page load;
-  // in-session selection changes just refresh the Load Data button state
-  // via updateRefreshButton.
+  // Page-load restore: render straight from the cache (no API traffic) if
+  // the current selection has any cached days in range; gaps and today's
+  // points wait for an explicit Load Data / Refresh. In-session selection
+  // changes skip this and only refresh the Load Data button state.
   async function autoLoadFromCache() {
-    if (!getSetting('storageEnabled', true)) {
+    if (!setting('storageEnabled')) {
       await updateRefreshButton();
       return;
     }
@@ -2336,6 +2206,17 @@
     return result.data || [];
   }
 
+  // Cache an API response per day. The current day is never cached: it's
+  // incomplete by nature, and a partial-day key would stop the gap fill
+  // from ever completing it - it rides along as a trailing uncached day of
+  // every load and gets cached complete from tomorrow onwards. Empty days
+  // are cached too: the day key's existence marks the range complete.
+  async function cacheRangeDays(user, device, data, fromDate, toDate) {
+    const dailyData = splitDataByDays(data, fromDate, toDate);
+    delete dailyData[formatDateForInput(new Date())];
+    await cacheDailyData(user, device, dailyData);
+  }
+
   // Load one user/device combo: cached days first, then API fetches for
   // uncached ranges. `label` names the combo in the loading overlay;
   // returns points + cached/fresh counts. `cacheOnly` (page-load
@@ -2345,13 +2226,6 @@
     let comboData = [];
     let cachedCount = 0;
     let freshCount = 0;
-
-    // The current day is never cached: it's incomplete by nature, and a
-    // partial-day key would stop the gap fill from ever completing it. It
-    // rides along as the trailing uncached day of every load while in
-    // range (fetched fresh, display-only) and gets cached complete from
-    // tomorrow onwards.
-    const todayKey = formatDateForInput(new Date());
 
     if (storageEnabled) {
       // Load cached days
@@ -2395,16 +2269,8 @@
         // Track fresh point count
         freshCount += rangeData.length;
 
-        // Cache every day in the range, even when the fetch returned
-        // nothing - the day key's existence marks the range complete so
-        // it isn't re-requested; the cache status counts only days that
-        // actually hold points
         if (storageEnabled) {
-          const dailyData = splitDataByDays(rangeData, range.from, range.to);
-          // Never persist the current day (see the note at the top of this
-          // function) - its points stay fresh-only until the day is over
-          delete dailyData[todayKey];
-          await cacheDailyData(user, device, dailyData);
+          await cacheRangeDays(user, device, rangeData, range.from, range.to);
         }
 
         comboData = comboData.concat(rangeData);
@@ -2414,34 +2280,41 @@
     return { data: comboData, cachedCount, freshCount };
   }
 
-  // Options: { cacheOnly } - serve exclusively from the cache with no API
-  // traffic (page-load auto-restore). Takes an options object so a click
-  // event can't leak through as a truthy flag.
-  async function loadData({ cacheOnly = false } = {}) {
-    clearHeaderError();
+  // Shared prologue for Load Data / Refresh from API: validate the
+  // selection, expand it to concrete combos, resolve the date range
+  async function resolveLoadContext(missingSelectionMessage) {
     const userSel = document.getElementById('userSelect').value;
     const deviceSel = document.getElementById('deviceSelect').value;
 
     // "All Users" implies "All Devices"; otherwise both must be selected
     if (!userSel || (userSel !== ALL_SELECTOR && !deviceSel)) {
-      showError('Please select both user and device.');
-      return;
+      showError(missingSelectionMessage);
+      return null;
     }
 
     const combos = await resolveSelectedCombos();
     if (combos.length === 0) {
       showError('No user/device combinations found for this selection.');
-      return;
+      return null;
     }
 
     const { from, to } = getDateRange();
     const fromDate = formatDateForInput(from);
     const toDate = formatDateForInput(to);
-    const requestedDays = getDaysInRange(fromDate, toDate);
+    return { combos, fromDate, toDate, requestedDays: getDaysInRange(fromDate, toDate) };
+  }
+
+  // Options: { cacheOnly } - serve exclusively from the cache with no API
+  // traffic (page-load auto-restore). Takes an options object so a click
+  // event can't leak through as a truthy flag.
+  async function loadData({ cacheOnly = false } = {}) {
+    clearHeaderError();
+    const ctx = await resolveLoadContext('Please select both user and device.');
+    if (!ctx) return;
+    const { combos, fromDate, toDate, requestedDays } = ctx;
 
     try {
-      // Check if storage is enabled
-      const storageEnabled = getSetting('storageEnabled', true);
+      const storageEnabled = setting('storageEnabled');
 
       let cachedPointCount = 0;
       let freshPointCount = 0;
@@ -2538,25 +2411,24 @@
         ? { min: null, max: null }
         : { min: altMin, max: altMax };
 
-      // Pin the stepped scales to the new data's ranges, then - unless
-      // this is the boot-time cache restore, which re-renders the
-      // session the user left (filters included) - reset the meter
-      // filters to "show all" (persisted) and re-pin the gradient
-      // window to the new range at full span
-      accuracyCtl.rebuild(buildAccuracySteps(state.data.accuracyRange.max), getSetting('accuracyMaxMeters', 0));
-      altitudeCtl.rebuild(buildAltitudeSteps(state.data.altitudeRange.max), getSetting('minAltitudeMeters', 0));
+      // Fresh loads reset the meter filters to "show all" (persisted) and
+      // re-pin the gradient window to the new range at full span; the
+      // boot-time cache restore re-renders the session the user left,
+      // filters included
       const altRange = state.data.altitudeRange;
       const hasAltitude = altRange.min !== null && altRange.min !== undefined;
       if (!cacheOnly) {
-        saveSetting('accuracyMaxMeters', 0, 0);
-        saveSetting('minAltitudeMeters', 0, 0);
-        accuracyCtl.rebuild(buildAccuracySteps(state.data.accuracyRange.max), 0);
-        altitudeCtl.rebuild(buildAltitudeSteps(state.data.altitudeRange.max), 0);
+        setSetting('accuracyMaxMeters', 0);
+        setSetting('minAltitudeMeters', 0);
         if (hasAltitude) {
-          saveSetting('altitudeMin', Math.floor(altRange.min), 0);
-          saveSetting('altitudeMax', Math.ceil(altRange.max), 1000);
+          setSetting('altitudeMin', Math.floor(altRange.min));
+          setSetting('altitudeMax', Math.ceil(altRange.max));
         }
       }
+      accuracyCtl.rebuild(buildAccuracySteps(state.data.accuracyRange.max),
+        cacheOnly ? setting('accuracyMaxMeters') : 0);
+      altitudeCtl.rebuild(buildAltitudeSteps(state.data.altitudeRange.max),
+        cacheOnly ? setting('minAltitudeMeters') : 0);
       if (hasAltitude) {
         syncAltitudeGradient(Math.floor(altRange.min), Math.ceil(altRange.max));
       }
@@ -2571,7 +2443,7 @@
       hideLoading();
 
       // Fit map to data bounds if setting is enabled, otherwise restore saved position
-      if (getSetting('autoFitToBounds', true) && state.data.filtered.length > 0) {
+      if (setting('autoFitToBounds') && state.data.filtered.length > 0) {
         fitMapToBounds();
       } else {
         restoreMapPosition();
@@ -2581,13 +2453,19 @@
       updateHeaderStatus('');
 
     } catch (error) {
-      showLoadingError('Failed to load locations: ' + error.message);
-      setTimeout(() => {
-        hideLoading();
-        clearMapData();
-        showError('Failed to load locations: ' + error.message);
-      }, 3000);
+      reportLoadError('Failed to load locations: ' + error.message, true);
     }
+  }
+
+  // Strip every rendered layer and reset the visible count, keeping the
+  // current map position
+  function clearRenderedLayers() {
+    state.layers.pointCloud.setData(null);
+    state.layers.lineCloud.setTracks(null, null, null);
+    removeHeatmap();
+    lineTrackRanges = [];
+    state.map.closePopup();
+    document.getElementById('statVisible').textContent = '0';
   }
 
   // Reset loaded data and clear layers; current map position is preserved
@@ -2598,12 +2476,8 @@
     state.data.altitudeRange = { min: null, max: null };
     state.data.timeRange = { start: null, end: null };
     state.data.sourceBreakdown = { cached: 0, fresh: 0 };
-    lineTrackRanges = [];
-    state.layers.pointCloud.setData(null);
-    state.layers.lineCloud.setTracks(null, null, null);
-    removeHeatmap();
+    clearRenderedLayers();
     invalidateProjectedPointCache();
-    document.getElementById('statVisible').textContent = '0';
     updateStats();
     document.getElementById('qaRecenter').disabled = true;
   }
@@ -3232,19 +3106,17 @@
   function wireDualRange(container, onCommit) {
     const minInput = container.querySelector('.dual-range-min');
     const maxInput = container.querySelector('.dual-range-max');
-    minInput.addEventListener('input', () => {
-      if (Number(minInput.value) > Number(maxInput.value)) {
-        maxInput.value = minInput.value;
-      }
+    const commit = () => {
       syncDualRange(container, Number(minInput.value), Number(maxInput.value));
       onCommit(Number(minInput.value), Number(maxInput.value));
+    };
+    minInput.addEventListener('input', () => {
+      if (Number(minInput.value) > Number(maxInput.value)) maxInput.value = minInput.value;
+      commit();
     });
     maxInput.addEventListener('input', () => {
-      if (Number(maxInput.value) < Number(minInput.value)) {
-        minInput.value = maxInput.value;
-      }
-      syncDualRange(container, Number(minInput.value), Number(maxInput.value));
-      onCommit(Number(minInput.value), Number(maxInput.value));
+      if (Number(maxInput.value) < Number(minInput.value)) minInput.value = maxInput.value;
+      commit();
     });
     container.addEventListener('change', () => refilterDebounced.flush());
   }
@@ -3276,7 +3148,7 @@
   }
 
   function syncPrecisionUI() {
-    const linked = getSetting('precisionLinked', true);
+    const linked = setting('precisionLinked');
     const lock = document.getElementById('precisionLink');
     lock.querySelector('use').setAttribute('href', linked ? '#lock-icon' : '#unlock-icon');
     lock.setAttribute('aria-pressed', String(linked));
@@ -3300,7 +3172,7 @@
     // The dragged bar's fill was already refreshed by wireDualRange;
     // the linked partner's thumbs didn't move, so sync it here
     saveSetting(ownSetting, [...range], [...PRECISION_DEFAULT_RANGE]);
-    if (getSetting('precisionLinked', true)) {
+    if (setting('precisionLinked')) {
       // Linked: both axes follow the one dragged bar
       saveSetting(otherSetting, [...range], [...PRECISION_DEFAULT_RANGE]);
       syncDualRange(document.getElementById(otherBar), range[0], range[1]);
@@ -3320,8 +3192,8 @@
   // bounds, the defaults AND the saved window stay reachable.
   function syncAltitudeGradient(boundLo, boundHi) {
     const bar = document.getElementById('altitudeGradientSlider');
-    const lo = getSetting('altitudeMin', 0);
-    const hi = getSetting('altitudeMax', 1000);
+    const lo = setting('altitudeMin');
+    const hi = setting('altitudeMax');
     const loBound = boundLo ?? Math.min(0, lo);
     const hiBound = boundHi ?? Math.max(1000, hi);
     bar.querySelector('.dual-range-min').min = loBound;
@@ -3336,8 +3208,8 @@
   }
 
   function applyAccuracyFilter() {
-    const maxAccuracy = getSetting('accuracyMaxMeters', 0);
-    const minAltitude = getSetting('minAltitudeMeters', 0);
+    const maxAccuracy = setting('accuracyMaxMeters');
+    const minAltitude = setting('minAltitudeMeters');
     const [latMin, latMax] = getPrecisionRange('latitudePrecisionRange');
     const [lonMin, lonMax] = getPrecisionRange('longitudePrecisionRange');
     // Only the Max step caps nothing - "7 or more". Every other upper
@@ -3370,14 +3242,14 @@
 
   async function handleUserChange() {
     const user = document.getElementById('userSelect').value;
-    saveSetting('selectedUser', user, '');
+    setSetting('selectedUser', user);
     await updateDeviceSelect();
     await updateRefreshButton();
   }
 
   async function handleDeviceChange() {
     const device = document.getElementById('deviceSelect').value;
-    saveSetting('selectedDevice', device, '');
+    setSetting('selectedDevice', device);
     await updateRefreshButton();
   }
 
@@ -3388,10 +3260,9 @@
   function buildHeatmapGradient(lowColor, midColor, midHigh1Color, midHigh2Color, highColor) {
     // Five stops mirror simpleheat's built-in ramp - what the official
     // OwnTracks frontend renders with. The two mid-high stops sit evenly
-    // between the mid stop and 1.0 (default 0.6 puts them at ~0.73/0.87);
-    // short adjacent segments make the ramp pass through green and yellow
-    // instead of a muddy blue-to-red blend
-    const midStop = getSetting('heatmapGradientMidStop', 0.6);
+    // between the mid stop and 1.0 so the ramp passes through green and
+    // yellow instead of a muddy blue-to-red blend
+    const midStop = setting('heatmapGradientMidStop');
     const span = (1 - midStop) / 3;
     return {
       0.0: lowColor,
@@ -3410,12 +3281,7 @@
     // here used to leave the previous (now filtered-out) points drawn
     // and clickable-looking
     if (state.data.filtered.length === 0) {
-      state.layers.pointCloud.setData(null);
-      state.layers.lineCloud.setTracks(null, null, null);
-      removeHeatmap();
-      lineTrackRanges = [];
-      state.map.closePopup();
-      document.getElementById('statVisible').textContent = '0';
+      clearRenderedLayers();
       return;
     }
 
@@ -3427,13 +3293,12 @@
 
     // Line layer: track ranges over the same filtered array; the
     // renderer draws the full-fidelity geometry for the current view
-    lineTrackRanges = getSetting('showLines', true) && state.data.filtered.length > 1
+    lineTrackRanges = setting('showLines')
       ? splitIntoTracks(state.data.filtered)
       : [];
     renderLines();
 
-    // Draw heatmap
-    if (getSetting('heatmapEnabled', false) && state.data.filtered.length > 0) {
+    if (setting('heatmapEnabled')) {
       drawHeatmap(state.data.filtered);
     }
 
@@ -3457,18 +3322,30 @@
   // cancels: x = lon/360 + 0.5, y = 0.5 - ln((1+sin)/(1-sin)) / 4pi.
   const MERCATOR_MAX_LAT = 85.0511287798;
 
-  // Canvas renderer that holds zero Leaflet path layers: the point cloud is
-  // drawn by one _draw() pass straight from the raw point arrays. Per-point
-  // L.circleMarker objects made Leaflet re-run its per-layer pipeline -
-  // project, bounds bookkeeping, one arc+fill per dot, hover/click scans -
-  // over every loaded point on each pan-end/zoom-end, which froze the map
-  // for ~0.5s after every drag and ~0.7s per zoom step at 500k+ points.
-  //
-  // The canvas lifecycle (positioning, sizing, pan/zoom transforms,
-  // moveend-triggered redraws) is inherited unchanged from L.Canvas - only
-  // the drawing itself is batched. Dots are blitted from pre-rendered
-  // sprites so each point composites individually, preserving the look of
-  // stacked translucent markers in dense clusters.
+  // Inline projection shared by the renderers and the click-proximity
+  // cache: bit-identical to latLngToLayerPoint (round, then subtract the
+  // pixel origin) without L.LatLng/L.Point allocation. Longitudes wrap to
+  // [-180, 180] like L.LatLng; latitudes clamp to the mercator limits.
+  function mercatorX(lon, S, originX) {
+    if (lon < -180 || lon > 180) {
+      lon -= Math.floor((lon + 180) / 360) * 360;
+    }
+    return Math.round((lon / 360 + 0.5) * S) - originX;
+  }
+
+  function mercatorY(lat, S, originY) {
+    const phi = lat > MERCATOR_MAX_LAT ? MERCATOR_MAX_LAT
+      : lat < -MERCATOR_MAX_LAT ? -MERCATOR_MAX_LAT : lat;
+    const sin = Math.sin(phi * (Math.PI / 180));
+    return Math.round((0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * S) - originY;
+  }
+
+  // Point cloud drawn by one _draw() pass straight from raw arrays - zero
+  // Leaflet path layers, so Leaflet's per-layer pipeline (project, bounds,
+  // hit-testing) never runs per point. The canvas lifecycle is inherited
+  // from L.Canvas unchanged; only the drawing is batched. Dots blit from
+  // pre-rendered sprites so stacked translucent dots keep compositing like
+  // the per-marker rendering they replaced.
   const PointCloudRenderer = L.Canvas.extend({
     _pts: null,       // source points (state.data.filtered) or null
     _style: null,     // {color, radius, opacity, lut, altMin, altRange}
@@ -3553,7 +3430,6 @@
       const map = this._map;
       const origin = map.getPixelOrigin();
       const S = 256 * Math.pow(2, map.getZoom());
-      const d = Math.PI / 180;
 
       // Padded layer-space rect the canvas covers
       const x0 = b.min.x, x1 = b.max.x, y0 = b.min.y, y1 = b.max.y;
@@ -3567,26 +3443,14 @@
       }
       const px = this._px, pxIdx = this._pxIdx;
 
-      // Project points into the padded bounds. World pixels are rounded
-      // exactly like latLngToLayerPoint (round, then subtract the pixel
-      // origin) so dots stay pixel-aligned with Leaflet-drawn geometry.
-      // Longitude is tested before the (comparatively expensive) Mercator
-      // y so far-zoom culls skip most of the trig.
+      // X is tested before the (comparatively expensive) mercator Y so
+      // far-zoom culls skip most of the trig
       let count = 0;
       for (let i = 0; i < n; i++) {
         const p = pts[i];
-        let lon = p.lon;
-        // Same normalization L.LatLng applies: longitudes wrap to [-180, 180]
-        if (lon < -180 || lon > 180) {
-          lon -= Math.floor((lon + 180) / 360) * 360;
-        }
-        const x = Math.round((lon / 360 + 0.5) * S) - origin.x;
+        const x = mercatorX(p.lon, S, origin.x);
         if (x < x0 || x > x1) continue;
-        const lat = p.lat;
-        const phi = lat > MERCATOR_MAX_LAT ? MERCATOR_MAX_LAT
-          : lat < -MERCATOR_MAX_LAT ? -MERCATOR_MAX_LAT : lat;
-        const sin = Math.sin(phi * d);
-        const y = Math.round((0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * S) - origin.y;
+        const y = mercatorY(p.lat, S, origin.y);
         if (y < y0 || y > y1) continue;
         px[count * 2] = x;
         px[count * 2 + 1] = y;
@@ -3626,29 +3490,27 @@
     }
   });
 
-  // Feed the point-cloud renderer. Everything about what gets drawn
-  // (culling to the padded viewport, per-point altitude colouring) is
-  // decided inside the renderer's draw pass, so this is just data + style.
+  // Feed the point-cloud renderer: just data + style (culling and
+  // altitude colouring are decided inside the renderer's draw pass)
   function renderPoints() {
     if (!state.map) return;
 
     const points = state.data.filtered;
-    if (!getSetting('showPoints', true) || points.length === 0) {
+    if (!setting('showPoints') || points.length === 0) {
       state.layers.pointCloud.setData(null);
       return;
     }
 
-    const altitudeEnabled = getSetting('altitudeEnabled', false);
-    const altMin = getSetting('altitudeMin', 0);
-    const altMax = getSetting('altitudeMax', 1000);
+    const altMin = setting('altitudeMin');
+    const altMax = setting('altitudeMax');
 
     state.layers.pointCloud.setData(points, {
-      color: getSetting('pointColor', '#3388ff'),
-      radius: getSetting('pointSize', 2),
-      opacity: getSetting('pointOpacity', 0.5),
-      lut: altitudeEnabled ? buildAltitudeColorLUT(
-        getSetting('altitudePointsLowColor', '#00ff00'),
-        getSetting('altitudePointsHighColor', '#ff0000')) : null,
+      color: setting('pointColor'),
+      radius: setting('pointSize'),
+      opacity: setting('pointOpacity'),
+      lut: setting('altitudeEnabled') ? buildAltitudeColorLUT(
+        setting('altitudePointsLowColor'),
+        setting('altitudePointsHighColor')) : null,
       altMin,
       altRange: (altMax - altMin) || 1
     });
@@ -3717,43 +3579,25 @@
 
   // Canvas renderer for route lines, batched like the point cloud: zero
   // Leaflet path layers, one _draw() pass over the shared projected-point
-  // cache. Draws the full geometry: true off-screen endpoints (runs extend
-  // one vertex past the padded canvas on each side, along the true
-  // segments), long segments crossing the view with no vertex inside it,
-  // and NO vertex-count cap. The previous implementation sliced tracks to
-  // the padded viewport and decimated with an escalating pixel tolerance
-  // until under a 10k-vertex cap - several full passes over every loaded
-  // point per zoom/pan (the lag), and the escalated tolerance smoothed
-  // tens of metres to over a kilometre of real geometry at dense zooms
-  // (the accuracy loss).
-  //
-  // The one concession to raster cost here is Douglas-Peucker vertex
-  // simplification at a FIXED sub-pixel screen tolerance: dropped vertices
-  // lie within LINE_SIMPLIFY_TOL pixels of the drawn chord, at every zoom,
-  // by construction - invisible by definition, and never escalating. At
-  // close zoom (consecutive points several pixels apart) it keeps
-  // essentially everything; straight corridors zoomed out collapse to
-  // their corners. Stroking every raw vertex instead would be exact but
-  // costs seconds per redraw at mid zoom (hundreds of thousands of
-  // sub-pixel joins).
+  // cache. Draws the full geometry - true off-screen endpoints, long
+  // segments crossing the view with no vertex inside it, no vertex-count
+  // cap - with Douglas-Peucker simplification at a FIXED sub-pixel screen
+  // tolerance (dropped vertices lie within LINE_SIMPLIFY_TOL pixels of the
+  // drawn chord at every zoom, by construction). The previous
+  // implementation sliced tracks to the viewport and decimated with an
+  // escalating tolerance under a 10k-vertex cap: several full passes over
+  // every point per zoom/pan (the lag), smoothing tens of metres to over a
+  // kilometre of real geometry at dense zooms (the accuracy loss).
   const LINE_SIMPLIFY_TOL = 0.75; // px on screen
 
-  // Progressive line rendering knobs. Chrome's software rasterizer handles
-  // a path with a few hundred segments fine but degrades superlinearly on
-  // huge single paths - at dense zooms the visible geometry can be 100k+
-  // segments (tens of millions of stroked pixels; 16 years of tracks
-  // crossing one view), and rendering them in one go froze the map for
-  // ~1s per pan-end/zoom-step. Three mitigations, none of which change a
-  // single drawn pixel:
+  // Progressive rendering knobs (none change a single drawn pixel):
   //   - LINE_SETTLE_MS: after pan/zoom, hold the last bitmap glued to the
-  //     geography (the same transform the zoom animation applies) and only
-  //     rebuild once interaction has been quiet - a zoom burst re-renders
-  //     once, not once per wheel tick
+  //     geography and rebuild only once interaction has been quiet - a
+  //     zoom burst re-renders once, not once per wheel tick
   //   - LINE_FRAME_SEG: the rebuild strokes segments spread across
-  //     animation frames, so no frame blocks; lines finish drawing shortly
-  //     after the view settles
+  //     animation frames, so no frame blocks
   //   - LINE_CHUNK_SEG: segments per stroke() call, small enough to stay
-  //     off the rasterizer's huge-path cliff
+  //     off Chrome's huge-single-path rasterizer cliff
   const LINE_SETTLE_MS = 150;
   const LINE_FRAME_SEG = 1500;
   const LINE_CHUNK_SEG = 500;
@@ -3806,11 +3650,8 @@
     // -- Render scheduling -------------------------------------------------
     //
     // View-driven renders (pan-end, zoom-end) go through a settle window:
-    // the last-rendered bitmap is held glued to the geography (scaled and
-    // translated by the same math the zoom animation applies), and the
-    // real rebuild happens once interaction has been quiet for
-    // LINE_SETTLE_MS - a zoom burst re-renders once instead of once per
-    // wheel tick. Data/style changes render immediately.
+    // the last-rendered bitmap is held glued to the geography while
+    // interaction continues; data/style changes render immediately.
 
     _update() {
       if (!this._map) return;
@@ -3859,9 +3700,8 @@
     //
     // Collect every segment to draw (visibility runs + DP simplification
     // + crossing tests), stroke them progressively into an OFFSCREEN work
-    // canvas, then commit atomically. The visible canvas keeps showing the
-    // last committed render (held to the view by the CSS transform) until
-    // the fresh one is complete - lines never flash off while redrawing.
+    // canvas, then commit atomically - the visible canvas keeps showing
+    // the last committed render until the fresh one is complete.
 
     _startRender() {
       const map = this._map;
@@ -3885,7 +3725,7 @@
 
       if (!this._pts || !this._ranges) {
         // Nothing to draw: clear the visible canvas immediately
-        this._adoptPending(bounds, map.getCenter(), map.getZoom(), m);
+        this._adoptPending(bounds, map.getCenter(), map.getZoom());
         const container = this._container;
         L.DomUtil.setPosition(container, bounds.min);
         container.width = m * px.x;
@@ -3904,9 +3744,8 @@
         this._work.width = m * px.x;
         this._work.height = m * px.y;
       } else {
-        // Same size as last render: the width assignment above isn't there
-        // to clear it, so wipe explicitly - stale segments must not
-        // accumulate under the new frame
+        // A same-size canvas is never cleared by the width assignment -
+        // wipe explicitly or renders accumulate stale ink
         this._wctx.setTransform(1, 0, 0, 1, 0, 0);
         this._wctx.clearRect(0, 0, this._work.width, this._work.height);
       }
@@ -3915,8 +3754,6 @@
       // becomes official at commit - a cancelled render must leave the
       // renderer describing the bitmap that is actually on screen
       this._pending = { bounds, center: map.getCenter(), zoom: map.getZoom(), m };
-
-      if (!this._pts || !this._ranges) return;
 
       const proj = getProjectedPoints();
       const n = this._pts.length;
@@ -3982,7 +3819,7 @@
 
     // Make a pending view official (used when the visible canvas is being
     // replaced synchronously)
-    _adoptPending(bounds, center, zoom, m) {
+    _adoptPending(bounds, center, zoom) {
       this._bounds = bounds;
       this._center = center;
       this._zoom = zoom;
@@ -3998,7 +3835,7 @@
       const b = pend.bounds;
       const px = b.getSize();
       const m = pend.m;
-      this._adoptPending(b, pend.center, pend.zoom, m);
+      this._adoptPending(b, pend.center, pend.zoom);
       const container = this._container;
       L.DomUtil.setPosition(container, b.min); // also clears the hold transform
       container.width = m * px.x;
@@ -4183,24 +4020,24 @@
     if (!state.map) return;
 
     const points = state.data.filtered;
-    if (!getSetting('showLines', true) || points.length < 2 || lineTrackRanges.length === 0) {
+    if (!setting('showLines') || points.length < 2 || lineTrackRanges.length === 0) {
       state.layers.lineCloud.setTracks(null, null, null);
       return;
     }
 
     const style = {
-      color: getSetting('lineColor', '#3388ff'),
-      weight: getSetting('lineWidth', 3),
-      opacity: getSetting('lineOpacity', 0.7)
+      color: setting('lineColor'),
+      weight: setting('lineWidth'),
+      opacity: setting('lineOpacity')
     };
 
-    if (getSetting('altitudeLinesEnabled', false)) {
+    if (setting('altitudeLinesEnabled')) {
+      const altMin = setting('altitudeMin');
+      const altMax = setting('altitudeMax');
       style.lut = buildAltitudeColorLUT(
-        getSetting('altitudeLinesLowColor', '#00ff00'),
-        getSetting('altitudeLinesHighColor', '#ff0000')
+        setting('altitudeLinesLowColor'),
+        setting('altitudeLinesHighColor')
       );
-      const altMin = getSetting('altitudeMin', 0);
-      const altMax = getSetting('altitudeMax', 1000);
       style.altMin = altMin;
       style.altRange = (altMax - altMin) || 1;
     }
@@ -4221,8 +4058,8 @@
     removeHeatmap();
 
     // Every point carries weight 1, matching the official frontend:
-    // frequently visited places and often-driven routes accumulate
-    // intensity naturally, one-off noise stays cold
+    // visited places and often-driven routes accumulate intensity
+    // naturally, one-off noise stays cold
     const heatmapData = [];
     for (let i = 0; i < points.length; i++) {
       const p = points[i];
@@ -4232,21 +4069,18 @@
     }
     if (heatmapData.length === 0) return;
 
-    // Dynamic radius and blur based on zoom level
+    // Zoom-adjusted radius/blur (unless disabled): the radius is screen
+    // pixels, so far out one blob spans tens of km and hotspots merge -
+    // shrink it so distinct spots stay readable; tighten slightly when
+    // close so heat concentrates on routes
     const zoom = state.map.getZoom();
-    const baseRadius = getSetting('heatmapRadius', 25);
-    const baseBlur = getSetting('heatmapBlur', 15);
+    const baseRadius = setting('heatmapRadius');
+    const baseBlur = setting('heatmapBlur');
 
-    // Adjust radius/blur by zoom, unless disabled in settings. The radius
-    // is in screen pixels, so when zoomed far out one blob spans tens of
-    // km and every hotspot merges into a single mass - shrink it so
-    // distinct spots (home, work, regular stops) stay readable. Tighten a
-    // little when close so the heat concentrates on routes instead of
-    // flooding around them.
     let zoomAdjustedRadius = baseRadius;
     let zoomAdjustedBlur = baseBlur;
 
-    if (getSetting('heatmapZoomScaling', false)) {
+    if (setting('heatmapZoomScaling')) {
       if (zoom < 8) {
         zoomAdjustedRadius = baseRadius * 0.6;
         zoomAdjustedBlur = baseBlur * 0.9;
@@ -4259,19 +4093,18 @@
     state.layers.heatmap = L.heatLayer(heatmapData, {
       radius: zoomAdjustedRadius,
       blur: zoomAdjustedBlur,
-      minOpacity: getSetting('heatmapMinOpacity', 0.05),
+      minOpacity: setting('heatmapMinOpacity'),
       // Saturation threshold: overlapping points needed to reach the
-      // hottest colour. Leaflet.heat's default of 1 saturates instantly,
-      // which is what turns a whole country solid red - 20 matches the
-      // official frontend
-      max: getSetting('heatmapMax', 20),
-      maxZoom: getSetting('heatmapMaxZoom', 18), // Limit max zoom for heatmap performance
+      // hottest colour. Leaflet.heat's default of 1 saturates instantly -
+      // 20 matches the official frontend
+      max: setting('heatmapMax'),
+      maxZoom: setting('heatmapMaxZoom'),
       gradient: buildHeatmapGradient(
-        getSetting('heatmapLowColor', '#0000ff'),
-        getSetting('heatmapMidColor', '#00ffff'),
-        getSetting('heatmapMidHighColor1', '#00ff00'),
-        getSetting('heatmapMidHighColor2', '#ffff00'),
-        getSetting('heatmapHighColor', '#ff0000')
+        setting('heatmapLowColor'),
+        setting('heatmapMidColor'),
+        setting('heatmapMidHighColor1'),
+        setting('heatmapMidHighColor2'),
+        setting('heatmapHighColor')
       ),
       zIndex: 200 // Bottom layer
     }).addTo(state.map);
@@ -4398,21 +4231,19 @@
     }
     const bounds = L.latLngBounds([minLat, minLng], [maxLat, maxLng]);
 
-    // Left padding keeps the fitted bounds clear of the quick-actions
-    // dock: it sits 10px off the screen edge (or the sidebar's right edge
-    // when open) and is offsetWidth wide. Measured rather than read from
-    // getBoundingClientRect because the dock's `left` is still mid-flight
-    // when the post-toggle refit runs; offsetWidth is transition-stable.
+    // Left padding keeps the fitted bounds clear of the quick-actions dock.
+    // offsetWidth (not getBoundingClientRect) because the dock's `left` is
+    // still mid-flight when the post-toggle refit runs; offsetWidth is
+    // transition-stable.
     const sidebar = document.getElementById('sidebar');
     const sidebarOpen = sidebar && state.sidebarOpen;
     const basePadding = 40;
     const dock = document.getElementById('quickActions');
     const dockClearance = 10 + (dock ? dock.offsetWidth : 65) + 10;
 
-    let leftPadding = dockClearance;
-    if (sidebarOpen && sidebar) {
-      leftPadding = sidebar.offsetWidth + dockClearance;
-    }
+    const leftPadding = sidebarOpen && sidebar
+      ? sidebar.offsetWidth + dockClearance
+      : dockClearance;
 
     // Record the fitted view once the move settles (timeout fallback:
     // Leaflet may not fire moveend if the fit changes nothing)
@@ -4456,19 +4287,10 @@
       const cache = new Float64Array(points.length * 2);
       const origin = state.map.getPixelOrigin();
       const S = 256 * Math.pow(2, zoom);
-      const d = Math.PI / 180;
       for (let i = 0; i < points.length; i++) {
         const p = points[i];
-        let lon = p.lon;
-        if (lon < -180 || lon > 180) {
-          lon -= Math.floor((lon + 180) / 360) * 360;
-        }
-        const lat = p.lat;
-        const phi = lat > MERCATOR_MAX_LAT ? MERCATOR_MAX_LAT
-          : lat < -MERCATOR_MAX_LAT ? -MERCATOR_MAX_LAT : lat;
-        const sin = Math.sin(phi * d);
-        cache[i * 2] = Math.round((lon / 360 + 0.5) * S) - origin.x;
-        cache[i * 2 + 1] = Math.round((0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * S) - origin.y;
+        cache[i * 2] = mercatorX(p.lon, S, origin.x);
+        cache[i * 2 + 1] = mercatorY(p.lat, S, origin.y);
       }
       projectedPointCache = cache;
       projectedPointCacheZoom = zoom;
@@ -4480,7 +4302,7 @@
   // Only fires for visible points: with the point layer hidden there's
   // nothing on the map to aim at, so clicks must fall through.
   function handleProximityClick(e) {
-    if (!getSetting('showPoints', true) || state.data.filtered.length === 0) return;
+    if (!setting('showPoints') || state.data.filtered.length === 0) return;
 
     const threshold = 15; // pixels - click radius
     const thresholdSq = threshold * threshold;
@@ -4558,6 +4380,17 @@
   function showLoadingError(message) {
     document.getElementById('loadingError').textContent = message;
     document.getElementById('loadingError').style.display = 'block';
+  }
+
+  // Surface a failed load: error text in the overlay first, then in the
+  // header once the overlay hides; data-loading paths also drop stale layers
+  function reportLoadError(message, clearData = false) {
+    showLoadingError(message);
+    setTimeout(() => {
+      hideLoading();
+      if (clearData) clearMapData();
+      showError(message);
+    }, 3000);
   }
 
   function showError(message) {
@@ -4664,7 +4497,7 @@
   }
 
   async function updateRefreshButton() {
-    const storageEnabled = getSetting('storageEnabled', true);
+    const storageEnabled = setting('storageEnabled');
     const user = document.getElementById('userSelect').value;
 
     // Expand the selection into concrete user/device combos so "All
@@ -4768,28 +4601,12 @@
 
   async function loadDataFromAPI() {
     clearHeaderError();
-    const userSel = document.getElementById('userSelect').value;
-    const deviceSel = document.getElementById('deviceSelect').value;
-
-    // "All Users" implies "All Devices"; otherwise both must be selected
-    if (!userSel || (userSel !== ALL_SELECTOR && !deviceSel)) {
-      showError('Please select user and device first');
-      return;
-    }
-
-    const combos = await resolveSelectedCombos();
-    if (combos.length === 0) {
-      showError('No user/device combinations found for this selection.');
-      return;
-    }
-
-    const { from, to } = getDateRange();
-    const fromDate = formatDateForInput(from);
-    const toDate = formatDateForInput(to);
-    const requestedDays = getDaysInRange(fromDate, toDate);
+    const ctx = await resolveLoadContext('Please select user and device first');
+    if (!ctx) return;
+    const { combos, fromDate, toDate, requestedDays } = ctx;
 
     try {
-      const storageEnabled = getSetting('storageEnabled', true);
+      const storageEnabled = setting('storageEnabled');
 
       // Always fetch the complete day range from midnight to just before midnight
       const rangeFrom = new Date(fromDate + 'T00:00:00');
@@ -4810,14 +4627,11 @@
 
         const comboData = await fetchLocations(user, device, rangeFrom, rangeTo);
 
-        // Cache every day in the range, even when the fetch returned
-        // nothing - keeps day keys consistent with the load path
+        // Keeps day keys consistent with the load path; the current day
+        // stays uncached (cacheRangeDays) and is fetched fresh by the
+        // loadData call below
         if (storageEnabled) {
-          const dailyData = splitDataByDays(comboData, fromDate, toDate);
-          // The current day is never cached (incomplete by nature) - the
-          // loadData call below fetches it fresh instead
-          delete dailyData[formatDateForInput(new Date())];
-          await cacheDailyData(user, device, dailyData);
+          await cacheRangeDays(user, device, comboData, fromDate, toDate);
           log(`[Refresh Debug] Cached ${comboData.length} points for ${label} across ${requestedDays.length} day(s)`);
         }
       }
@@ -4825,12 +4639,7 @@
       await loadData();
 
     } catch (error) {
-      showLoadingError('Failed to load locations: ' + error.message);
-      setTimeout(() => {
-        hideLoading();
-        clearMapData();
-        showError('Failed to load locations: ' + error.message);
-      }, 3000);
+      reportLoadError('Failed to load locations: ' + error.message, true);
     }
   }
 
