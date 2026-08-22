@@ -109,11 +109,11 @@ It is recommended to view this document directly as the table is too wide for th
 
 | Environment Variable | JSON Path | Description | Required | Default |
 |---------------------|-----------|-------------|----------|---------|
-| `APP_API_URL` | `api.url` | OwnTracks recorder API base URL | ✅ Yes | — |
-| `APP_API_USERNAME` | `api.username` | Basic auth username | No | — |
-| `APP_API_PASSWORD` | `api.password` | Basic auth password | No | — |
-| `APP_API_COOKIENAME` | `api.cookieName` | Cookie name | No | — |
-| `APP_API_COOKIEVALUE` | `api.cookieValue` | Cookie value | No | — |
+| `APP_API_URL` | `api.url` | OwnTracks recorder API base URL | ✅ Yes | - |
+| `APP_API_USERNAME` | `api.username` | Basic auth username | No | - |
+| `APP_API_PASSWORD` | `api.password` | Basic auth password | No | - |
+| `APP_API_COOKIENAME` | `api.cookieName` | Cookie name | No | - |
+| `APP_API_COOKIEVALUE` | `api.cookieValue` | Cookie value | No | - |
 | `APP_API_TIMEOUT` | `api.timeout` | Request timeout (milliseconds) | No | `600000` |
 | `APP_MAP_TILESERVER` | `map.tileServer` | Map tile server URL template | No | `https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png` |
 | `APP_MAP_MINZOOM` | `map.minZoom` | Minimum zoom level | No | `2` |
@@ -122,8 +122,8 @@ It is recommended to view this document directly as the table is too wide for th
 | `APP_MAP_SATELLITETILESERVER` | `map.satelliteTileServer` | Satellite tile server URL template | No | `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}` |
 | `APP_MAP_SATELLITELABELSERVER` | `map.satelliteLabelServer` | Road/place-name overlay for satellite view (empty string disables) | No | `https://basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}.png` |
 | `APP_MAP_SATELLITEMAXZOOM` | `map.satelliteMaxZoom` | Max native zoom for satellite tiles (upscaled beyond) | No | `19` |
-| `APP_DEFAULTS_USER` | `defaults.user` | Default username to select | No | — |
-| `APP_DEFAULTS_DEVICE` | `defaults.device` | Default device to select | No | — |
+| `APP_DEFAULTS_USER` | `defaults.user` | Default username to select | No | - |
+| `APP_DEFAULTS_DEVICE` | `defaults.device` | Default device to select | No | - |
 | `APP_DISPLAY_POINTS_SHOW` | `display.points.show` | Show points by default | No | `true` |
 | `APP_DISPLAY_POINTS_COLOR` | `display.points.color` | Default point color | No | `#3388ff` |
 | `APP_DISPLAY_POINTS_SIZE` | `display.points.size` | Default point size | No | `2` |
@@ -247,7 +247,7 @@ The point, line, and heatmap settings each live behind their own collapsible dro
 - The accuracy and altitude sliders use stepped scales (finer steps where values cluster) so small values are individually selectable; clicking the value number opens an editor for an exact value
 - Loading new data resets the accuracy and altitude filters to 0 (persisted)
 - Filter points by coordinate precision (decimal places of the stored lat/lon, e.g. 53.1 = 1, 53.4534562 = 7); the 7+ step includes anything with 7 or more, any other upper bound discards higher precision
-- Coordinates with no decimals are always hidden; precision defaults to 1–7+, a lock ties latitude and longitude to one shared range, unlocking gives each axis its own slider
+- Coordinates with no decimals are always hidden; precision defaults to 1-7+, a lock ties latitude and longitude to one shared range, unlocking gives each axis its own slider
 
 ### Statistics
 - Total/visible point counts, loaded time range, and accuracy and altitude ranges for the current selection

@@ -1045,7 +1045,7 @@
     wireDualRange(document.getElementById('altitudeGradientSlider'), (min, max) => {
       saveSetting('altitudeMin', min, 0);
       saveSetting('altitudeMax', max, 1000);
-      document.getElementById('altitudeGradientValue').textContent = `${min} – ${max}`;
+      document.getElementById('altitudeGradientValue').textContent = `${min} - ${max}`;
       refilterDebounced();
     });
     bindSettingColor('altitudePointsLowColor', '#00ff00');
@@ -3226,7 +3226,9 @@
 
   // Thumb order is enforced by pushing: dragging one thumb past the
   // other drags it along, so the whole range can be swept with either
-  // end. onCommit receives the ordered [min, max] after each input.
+  // end. The fill span is refreshed here so every wired bar keeps its
+  // highlight between the thumbs during drags; onCommit receives the
+  // ordered [min, max] after each input.
   function wireDualRange(container, onCommit) {
     const minInput = container.querySelector('.dual-range-min');
     const maxInput = container.querySelector('.dual-range-max');
@@ -3234,12 +3236,14 @@
       if (Number(minInput.value) > Number(maxInput.value)) {
         maxInput.value = minInput.value;
       }
+      syncDualRange(container, Number(minInput.value), Number(maxInput.value));
       onCommit(Number(minInput.value), Number(maxInput.value));
     });
     maxInput.addEventListener('input', () => {
       if (Number(maxInput.value) < Number(minInput.value)) {
         minInput.value = maxInput.value;
       }
+      syncDualRange(container, Number(minInput.value), Number(maxInput.value));
       onCommit(Number(minInput.value), Number(maxInput.value));
     });
     container.addEventListener('change', () => refilterDebounced.flush());
@@ -3265,7 +3269,7 @@
     const fmt = (container) => {
       const min = parseInt(container.querySelector('.dual-range-min').value, 10);
       const max = parseInt(container.querySelector('.dual-range-max').value, 10);
-      return `${min} – ${max === PRECISION_MAX ? '7+' : max}`;
+      return `${min} - ${max === PRECISION_MAX ? '7+' : max}`;
     };
     document.getElementById('latPrecisionValue').textContent = fmt(document.getElementById('latPrecisionSlider'));
     document.getElementById('lonPrecisionValue').textContent = fmt(document.getElementById('lonPrecisionSlider'));
@@ -3289,14 +3293,12 @@
   }
 
   function commitPrecision(axis, range) {
-    const ownBar = document.getElementById(axis === 'lat' ? 'latPrecisionSlider' : 'lonPrecisionSlider');
     const otherBar = axis === 'lat' ? 'lonPrecisionSlider' : 'latPrecisionSlider';
     const ownSetting = axis === 'lat' ? 'latitudePrecisionRange' : 'longitudePrecisionRange';
     const otherSetting = axis === 'lat' ? 'longitudePrecisionRange' : 'latitudePrecisionRange';
 
-    // The dragged input already moved its own thumb; this also refreshes
-    // the fill span to match
-    syncDualRange(ownBar, range[0], range[1]);
+    // The dragged bar's fill was already refreshed by wireDualRange;
+    // the linked partner's thumbs didn't move, so sync it here
     saveSetting(ownSetting, [...range], [...PRECISION_DEFAULT_RANGE]);
     if (getSetting('precisionLinked', true)) {
       // Linked: both axes follow the one dragged bar
@@ -3330,7 +3332,7 @@
     const clampedLo = Math.min(Math.max(lo, loBound), hiBound);
     const clampedHi = Math.min(Math.max(hi, loBound), hiBound);
     syncDualRange(bar, clampedLo, clampedHi);
-    document.getElementById('altitudeGradientValue').textContent = `${clampedLo} – ${clampedHi}`;
+    document.getElementById('altitudeGradientValue').textContent = `${clampedLo} - ${clampedHi}`;
   }
 
   function applyAccuracyFilter() {
