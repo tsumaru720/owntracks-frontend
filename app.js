@@ -3902,11 +3902,18 @@
   }
 
   function createPopupContent(point) {
-    const date = new Date(point.tst * 1000);
-    const dateStr = date.toLocaleString();
+    const dateStr = new Date(point.tst * 1000).toLocaleString('en-GB', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    });
 
     let content = `<div style="min-width: 200px;">`;
-    content += `<div><strong>Time:</strong> ${dateStr}</div>`;
+    content += `<div style="margin-bottom: 8px;">${dateStr}</div>`;
     content += `<div><strong>Lat:</strong> ${point.lat.toFixed(6)}</div>`;
     content += `<div><strong>Lon:</strong> ${point.lon.toFixed(6)}</div>`;
 
