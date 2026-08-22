@@ -15,11 +15,9 @@
   const state = {
     map: null,
     layers: {
-      points: null,
-      lines: null,
-      heatmap: null,
-      pointRenderer: null,
-      lineRenderer: null
+      pointCloud: null,
+      lineCloud: null,
+      heatmap: null
     },
     data: {
       raw: [],           // All points from API
@@ -406,46 +404,30 @@
 
     updateTileLayer();
 
-    // After a zoom settles, re-slice the lines (the pixel tolerance and
-    // visible region change with zoom); the heatmap rebuild shares the
-    // same debounce. Zooms also fire moveend, which handles any
-    // coverage-driven marker/line work synchronously.
-    const redrawLinesOnZoom = debounce(() => {
+    // Heatmap needs rebuilding after a zoom settles: its radius and blur
+    // are zoom-adjusted. Lines and points redraw themselves via their
+    // renderers' own moveend handling.
+    const rebuildHeatmapOnZoom = debounce(() => {
       if (state.data.filtered.length === 0) return;
-      if (lineTracks.length > 0) renderLines();
       if (getSetting('heatmapEnabled', false)) {
         drawHeatmap(state.data.filtered);
       }
     }, 150);
     state.map.on('zoomend', () => {
-      if (state.data.filtered.length > 0) redrawLinesOnZoom();
+      if (state.data.filtered.length > 0) rebuildHeatmapOnZoom();
     });
 
-    // Re-cull point markers and re-slice the line layer when the view
-    // leaves the region covered by the last render. Both are padded
-    // well beyond the viewport, so this only fires on larger moves.
-    state.map.on('moveend', () => {
-      if (state.data.filtered.length === 0) return;
-      if (pointSliceBounds && !viewCoveredBy(pointSliceBounds)) {
-        renderPoints();
-      }
-      if (lineTracks.length > 0 && !viewCoveredBy(lineSliceBounds)) {
-        renderLines();
-      }
-    });
-
-    // Order: Heatmap (bottom), Lines (middle), Points (top)
-    state.layers.points = L.layerGroup([], { zIndex: 400 }).addTo(state.map);
-    state.layers.lines = L.layerGroup([], { zIndex: 300 }).addTo(state.map);
     state.layers.heatmap = null; // Will be created with zIndex: 200 when needed
 
-    // Dedicated canvases for points and lines. A shared canvas couples
-    // them: every layer update forces a redraw pass over all layers on
-    // that canvas, so a line re-slice would re-project every point
-    // marker too. Separate renderers decouple update costs. Both are
-    // added to the map lazily by Leaflet when first used.
-    state.layers.pointRenderer = L.canvas();
-    state.layers.lineRenderer = L.canvas();
+    // Batched point renderer (defined with the point rendering code below).
+    // Added before the line renderer so its canvas precedes the line canvas
+    // in the overlay pane - same stacking as when point markers were added
+    // before the first polyline.
+    state.layers.pointCloud = new PointCloudRenderer().addTo(state.map);
+
+    // Batched line renderer on its own canvas, so neither layer's redraw
+    // forces a pass over the other's canvas.
+    state.layers.lineCloud = new LineCloudRenderer().addTo(state.map);
 
     // Add proximity click handler for easier point interaction
     state.map.on('click', handleProximityClick);
@@ -2616,11 +2598,9 @@
     state.data.altitudeRange = { min: null, max: null };
     state.data.timeRange = { start: null, end: null };
     state.data.sourceBreakdown = { cached: 0, fresh: 0 };
-    lineTracks = [];
-    lineSliceBounds = null;
-    pointSliceBounds = null;
-    state.layers.points.clearLayers();
-    state.layers.lines.clearLayers();
+    lineTrackRanges = [];
+    state.layers.pointCloud.setData(null);
+    state.layers.lineCloud.setTracks(null, null, null);
     removeHeatmap();
     invalidateProjectedPointCache();
     document.getElementById('statVisible').textContent = '0';
@@ -3050,11 +3030,15 @@
     return dailyData;
   }
 
-  // Gzip-compress points to a Uint8Array for IndexedDB storage
+  // Gzip-compress points to a Uint8Array for IndexedDB storage.
+  // Underscore-prefixed keys (per-point memoized values like the
+  // precision filter's decimal-place counts) are skipped so runtime
+  // caches never leak into the persisted payload.
   function compressPoints(points) {
     if (!points || points.length === 0) return new Uint8Array(0);
 
-    const jsonStr = JSON.stringify(points);
+    const jsonStr = JSON.stringify(points,
+      (key, value) => key.charAt(0) === '_' ? undefined : value);
 
     if (typeof window.pako !== 'undefined') {
       try {
@@ -3365,11 +3349,15 @@
       // alt of non-number means "no altitude reported" - always kept,
       // like unreported accuracy
       if (minAltitude > 0 && typeof point.alt === 'number' && !Number.isNaN(point.alt) && point.alt < minAltitude) return false;
+      // Decimal places never change for a loaded point: memoize on the
+      // object (underscore keys are kept out of the cache - see
+      // compressPoints) so repeated refilters - slider drags - skip the
+      // string work entirely
       // The precision floor always applies - whole-number coordinates
       // sit below every selectable minimum
-      const latDp = decimalPlaces(point.lat);
+      const latDp = point._dpLat !== undefined ? point._dpLat : (point._dpLat = decimalPlaces(point.lat));
       if (latDp < latMin || (latCapped && latDp > latMax)) return false;
-      const lonDp = decimalPlaces(point.lon);
+      const lonDp = point._dpLon !== undefined ? point._dpLon : (point._dpLon = decimalPlaces(point.lon));
       if (lonDp < lonMin || (lonCapped && lonDp > lonMax)) return false;
       return true;
     });
@@ -3412,30 +3400,6 @@
     };
   }
 
-  // Split the filtered points into contiguous per user/device tracks so
-  // route lines stay within one device instead of drawing a connecting
-  // segment wherever the data switches user/device
-  function splitIntoTracks(points) {
-    const tracks = [];
-    let current = [];
-    let currentUser;
-    let currentDevice;
-
-    for (let i = 0; i < points.length; i++) {
-      const p = points[i];
-      if (current.length > 0 && (p.user !== currentUser || p.device !== currentDevice)) {
-        tracks.push(current);
-        current = [];
-      }
-      currentUser = p.user;
-      currentDevice = p.device;
-      current.push(p);
-    }
-    if (current.length > 0) tracks.push(current);
-
-    return tracks;
-  }
-
   function redrawMap() {
     if (!state.map) return;
 
@@ -3444,29 +3408,24 @@
     // here used to leave the previous (now filtered-out) points drawn
     // and clickable-looking
     if (state.data.filtered.length === 0) {
-      state.layers.points.clearLayers();
-      state.layers.lines.clearLayers();
+      state.layers.pointCloud.setData(null);
+      state.layers.lineCloud.setTracks(null, null, null);
       removeHeatmap();
-      lineTracks = [];
-      lineSliceBounds = null;
-      pointSliceBounds = null;
+      lineTrackRanges = [];
       state.map.closePopup();
       document.getElementById('statVisible').textContent = '0';
       return;
     }
 
-    state.layers.points.clearLayers();
-    state.layers.lines.clearLayers();
     removeHeatmap();
 
-    // Point markers: culled to the padded viewport by renderPoints()
-    // when most points are off-screen
+    // Point layer: the renderer draws from state.data.filtered, culled
+    // to the padded viewport inside its own draw pass
     renderPoints();
 
-    // Line layer: tracks are fixed here (data only); renderLines()
-    // re-slices them against the current view - cheap enough to run on
-    // every zoom or long pan without a full redraw
-    lineTracks = getSetting('showLines', true) && state.data.filtered.length > 1
+    // Line layer: track ranges over the same filtered array; the
+    // renderer draws the full-fidelity geometry for the current view
+    lineTrackRanges = getSetting('showLines', true) && state.data.filtered.length > 1
       ? splitIntoTracks(state.data.filtered)
       : [];
     renderLines();
@@ -3481,27 +3440,223 @@
   }
 
   // ============================================================================
-  // Point Marker Rendering (viewport culling)
+  // Point Marker Rendering (batched point-cloud canvas)
   // ============================================================================
 
-  // Padded viewport bounds recorded by the last point render; when the
-  // view leaves this region the markers are re-culled. null = markers
-  // cover the whole world (no culling in effect)
-  let pointSliceBounds = null;
+  // Sprite budget: above this many visible points per redraw, points landing
+  // in the same pixel cell draw once instead of N times. Zoomed far out, a
+  // city's worth of points piles into a few thousand pixels; blending a
+  // stack of identical dots there only shifts the colour of an
+  // already-saturated cell.
+  const POINT_DRAW_BUDGET = 75000;
 
-  // True when the current view lies entirely inside the given slice
-  // bounds recorded by an earlier render
-  function viewCoveredBy(slice) {
-    if (!slice) return false;
-    const b = state.map.getBounds();
-    return b.getSouth() >= slice.south &&
-      b.getNorth() <= slice.north &&
-      (slice.wraps ||
-        (b.getWest() >= slice.west && b.getEast() <= slice.east));
+  // Web-mercator in world-pixel space, algebraically identical to Leaflet's
+  // EPSG:3857 (SphericalMercator + Transformation). The R scale factor
+  // cancels: x = lon/360 + 0.5, y = 0.5 - ln((1+sin)/(1-sin)) / 4pi.
+  const MERCATOR_MAX_LAT = 85.0511287798;
+
+  // Canvas renderer that holds zero Leaflet path layers: the point cloud is
+  // drawn by one _draw() pass straight from the raw point arrays. Per-point
+  // L.circleMarker objects made Leaflet re-run its per-layer pipeline -
+  // project, bounds bookkeeping, one arc+fill per dot, hover/click scans -
+  // over every loaded point on each pan-end/zoom-end, which froze the map
+  // for ~0.5s after every drag and ~0.7s per zoom step at 500k+ points.
+  //
+  // The canvas lifecycle (positioning, sizing, pan/zoom transforms,
+  // moveend-triggered redraws) is inherited unchanged from L.Canvas - only
+  // the drawing itself is batched. Dots are blitted from pre-rendered
+  // sprites so each point composites individually, preserving the look of
+  // stacked translucent markers in dense clusters.
+  const PointCloudRenderer = L.Canvas.extend({
+    _pts: null,       // source points (state.data.filtered) or null
+    _style: null,     // {color, radius, opacity, lut, altMin, altRange}
+    _colorIdx: null,  // Uint16Array sprite index per point (altitude mode)
+    _sprites: null,   // sprite canvases, indexed by colour
+    _spriteKey: '',   // style signature the sprites were built for
+    _px: null,        // Float64Array [x0, y0, x1, y1...] of visible points
+    _pxIdx: null,     // Uint16Array sprite index per visible point
+    _grid: null,      // Uint8Array dedup grid, reused across redraws
+
+    // points: array of {lat, lon, alt?}; null/empty hides the layer.
+    // style: {color, radius, opacity, lut (256-entry hex array or null),
+    // altMin, altRange} - the LUT turns on per-point altitude colours
+    setData(points, style) {
+      if (!points || points.length === 0) {
+        this._pts = null;
+        this._colorIdx = null;
+      } else {
+        this._pts = points;
+        this._style = style;
+        if (style.lut) {
+          // Gradient colour as a sprite index; 256 = no altitude reported
+          // (base colour), matching the old per-marker fallback
+          const idx = new Uint16Array(points.length);
+          for (let i = 0; i < points.length; i++) {
+            const alt = points[i].alt;
+            if (typeof alt === 'number' && !Number.isNaN(alt)) {
+              const t = (alt - style.altMin) / style.altRange;
+              idx[i] = t <= 0 ? 0 : t >= 1 ? 255 : (t * 255) | 0;
+            } else {
+              idx[i] = 256;
+            }
+          }
+          this._colorIdx = idx;
+        } else {
+          this._colorIdx = null;
+        }
+      }
+      if (this._map) this._redraw();
+    },
+
+    _ensureSprites() {
+      const style = this._style;
+      const key = style.radius + '|' + style.opacity + '|' + style.color +
+        '|' + (style.lut ? 'lut' : 'flat');
+      if (this._sprites && this._spriteKey === key) return;
+
+      // Sprites render at device resolution so the blit is 1:1 on retina
+      // (the canvas context is scale(2)-ed there by L.Canvas)
+      const dpr = L.Browser.retina ? 2 : 1;
+      const r = Math.max(1, style.radius);
+      const size = Math.ceil(r * 2 * dpr);
+      const make = (hex) => {
+        const c = document.createElement('canvas');
+        c.width = c.height = size;
+        const g = c.getContext('2d');
+        // Alpha baked into the sprite: each blit composites like one
+        // canvas circle fill at fillOpacity, so overlapping dots stack
+        g.globalAlpha = style.opacity;
+        g.fillStyle = hex;
+        g.beginPath();
+        g.arc(size / 2, size / 2, r * dpr, 0, Math.PI * 2);
+        g.fill();
+        return c;
+      };
+
+      if (style.lut) {
+        const sprites = new Array(257);
+        for (let i = 0; i < 256; i++) sprites[i] = make(style.lut[i]);
+        sprites[256] = make(style.color);
+        this._sprites = sprites;
+      } else {
+        this._sprites = [make(style.color)];
+      }
+      this._spriteKey = key;
+    },
+
+    _draw() {
+      const ctx = this._ctx, b = this._bounds;
+      if (!ctx || !b || !this._pts || !this._style) return;
+
+      const map = this._map;
+      const origin = map.getPixelOrigin();
+      const S = 256 * Math.pow(2, map.getZoom());
+      const d = Math.PI / 180;
+
+      // Padded layer-space rect the canvas covers
+      const x0 = b.min.x, x1 = b.max.x, y0 = b.min.y, y1 = b.max.y;
+      const pts = this._pts;
+      const n = pts.length;
+      const colorIdx = this._colorIdx;
+
+      if (!this._px || this._px.length < n * 2) {
+        this._px = new Float64Array(n * 2);
+        this._pxIdx = new Uint16Array(n);
+      }
+      const px = this._px, pxIdx = this._pxIdx;
+
+      // Project points into the padded bounds. World pixels are rounded
+      // exactly like latLngToLayerPoint (round, then subtract the pixel
+      // origin) so dots stay pixel-aligned with Leaflet-drawn geometry.
+      // Longitude is tested before the (comparatively expensive) Mercator
+      // y so far-zoom culls skip most of the trig.
+      let count = 0;
+      for (let i = 0; i < n; i++) {
+        const p = pts[i];
+        let lon = p.lon;
+        // Same normalization L.LatLng applies: longitudes wrap to [-180, 180]
+        if (lon < -180 || lon > 180) {
+          lon -= Math.floor((lon + 180) / 360) * 360;
+        }
+        const x = Math.round((lon / 360 + 0.5) * S) - origin.x;
+        if (x < x0 || x > x1) continue;
+        const lat = p.lat;
+        const phi = lat > MERCATOR_MAX_LAT ? MERCATOR_MAX_LAT
+          : lat < -MERCATOR_MAX_LAT ? -MERCATOR_MAX_LAT : lat;
+        const sin = Math.sin(phi * d);
+        const y = Math.round((0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * S) - origin.y;
+        if (y < y0 || y > y1) continue;
+        px[count * 2] = x;
+        px[count * 2 + 1] = y;
+        if (colorIdx) pxIdx[count] = colorIdx[i];
+        count++;
+      }
+      if (count === 0) return;
+
+      this._ensureSprites();
+      const sprites = this._sprites;
+      const r = Math.max(1, this._style.radius);
+
+      // Pixel-grid dedup past the sprite budget (see POINT_DRAW_BUDGET)
+      let grid = null, cell = 1, gw = 0;
+      if (count > POINT_DRAW_BUDGET) {
+        cell = Math.max(1, r);
+        gw = Math.ceil((x1 - x0) / cell) + 1;
+        const gh = Math.ceil((y1 - y0) / cell) + 1;
+        const glen = gw * gh;
+        if (!this._grid || this._grid.length < glen) {
+          this._grid = new Uint8Array(glen);
+        }
+        grid = this._grid;
+        grid.fill(0, 0, glen);
+      }
+
+      for (let k = 0; k < count; k++) {
+        const x = px[k * 2], y = px[k * 2 + 1];
+        if (grid) {
+          const g = (((y - y0) / cell) | 0) * gw + (((x - x0) / cell) | 0);
+          if (grid[g]) continue;
+          grid[g] = 1;
+        }
+        ctx.drawImage(colorIdx ? sprites[pxIdx[k]] : sprites[0],
+          x - r, y - r, r * 2, r * 2);
+      }
+    }
+  });
+
+  // Feed the point-cloud renderer. Everything about what gets drawn
+  // (culling to the padded viewport, per-point altitude colouring) is
+  // decided inside the renderer's draw pass, so this is just data + style.
+  function renderPoints() {
+    if (!state.map) return;
+
+    const points = state.data.filtered;
+    if (!getSetting('showPoints', true) || points.length === 0) {
+      state.layers.pointCloud.setData(null);
+      return;
+    }
+
+    const altitudeEnabled = getSetting('altitudeEnabled', false);
+    const altMin = getSetting('altitudeMin', 0);
+    const altMax = getSetting('altitudeMax', 1000);
+
+    state.layers.pointCloud.setData(points, {
+      color: getSetting('pointColor', '#3388ff'),
+      radius: getSetting('pointSize', 2),
+      opacity: getSetting('pointOpacity', 0.5),
+      lut: altitudeEnabled ? buildAltitudeColorLUT(
+        getSetting('altitudePointsLowColor', '#00ff00'),
+        getSetting('altitudePointsHighColor', '#ff0000')) : null,
+      altMin,
+      altRange: (altMax - altMin) || 1
+    });
   }
 
-  // Wrap-aware containment predicate shared by point culling, line
-  // slicing and the viewport stats scan
+  // ============================================================================
+  // Line Rendering (full-fidelity batched canvas)
+  // ============================================================================
+
+  // Wrap-aware containment predicate shared by the viewport stats scan
   function makeBoundsTest(west, east, north, south) {
     const wraps = west > east; // region crossing the antimeridian
     return (p) => p.lat >= south && p.lat <= north &&
@@ -3510,243 +3665,545 @@
         : (p.lon >= west && p.lon <= east));
   }
 
-  // Rebuild the point marker layer. When most points are off-screen
-  // (zoomed in), only markers within the padded viewport are created -
-  // Leaflet's canvas redraws every layer it holds on each zoom, so
-  // holding 78k markers when a few hundred are visible is what made
-  // zooming into a cluster crawl. When most points ARE visible the full
-  // set is drawn (no culling) so zoomed-out behaviour is unchanged and
-  // no re-culling churn is introduced while panning around at low zoom.
-  function renderPoints() {
-    if (!state.map) return;
-    state.layers.points.clearLayers();
+  // Contiguous per user/device track index ranges over state.data.filtered
+  // ([start, end) into the flat array); rebuilt by redrawMap when the data
+  // changes. One device's points are contiguous in the filtered array, so a
+  // range is a track and route lines never jump between devices.
+  let lineTrackRanges = [];
 
-    const points = state.data.filtered;
-    if (!getSetting('showPoints', true) || points.length === 0) {
-      pointSliceBounds = null;
-      return;
-    }
-
-    const altitudeEnabled = getSetting('altitudeEnabled', false);
-    const pointColor = getSetting('pointColor', '#3388ff');
-    const pointSize = getSetting('pointSize', 2);
-    const pointOpacity = getSetting('pointOpacity', 0.5);
-    const altMin = getSetting('altitudeMin', 0);
-    const altMax = getSetting('altitudeMax', 1000);
-    // Precomputed gradient - per-point colour work is an array index
-    // instead of hex parsing + string building
-    const pointsLUT = altitudeEnabled
-      ? buildAltitudeColorLUT(
-          getSetting('altitudePointsLowColor', '#00ff00'),
-          getSetting('altitudePointsHighColor', '#ff0000'))
-      : null;
-    const altRange = (altMax - altMin) || 1;
-
-    // Decide culling: pad the viewport by 50% and count how many
-    // points fall inside (numeric compares only)
-    const b = state.map.getBounds().pad(0.5);
-    const west = b.getWest();
-    const east = b.getEast();
-    const north = b.getNorth();
-    const south = b.getSouth();
-    const wraps = west > east;
-
-    const inPaddedView = makeBoundsTest(west, east, north, south);
-
-    let total = 0;
-    let inViewCount = 0;
-    for (let i = 0; i < points.length; i++) {
-      total++;
-      if (inPaddedView(points[i])) inViewCount++;
-    }
-
-    // Culling only pays when most points are off-screen; otherwise draw
-    // everything and mark coverage as world-wide to avoid re-cull churn
-    const cull = inViewCount < total * 0.7;
-    pointSliceBounds = cull
-      ? { west, east, north, south, wraps }
-      : { west: -180, east: 180, north: 90, south: -90, wraps: false };
-
-    for (let i = 0; i < points.length; i++) {
-      const point = points[i];
-      if (cull && !inPaddedView(point)) continue;
-
-      let color = pointColor;
-      if (pointsLUT && point.alt !== undefined && point.alt !== null) {
-        const t = (point.alt - altMin) / altRange;
-        color = pointsLUT[t <= 0 ? 0 : t >= 1 ? 255 : (t * 255) | 0];
+  // Split the filtered points into contiguous per user/device track index
+  // ranges. Ranges need at least two points - a lone point draws no line.
+  function splitIntoTracks(points) {
+    const ranges = [];
+    let start = 0;
+    for (let i = 1; i <= points.length; i++) {
+      if (i === points.length ||
+          points[i].user !== points[i - 1].user ||
+          points[i].device !== points[i - 1].device) {
+        if (i - start > 1) ranges.push([start, i]);
+        start = i;
       }
-
-      state.layers.points.addLayer(createPointMarker(point.lat, point.lon, {
-        fillColor: color,
-        radius: pointSize,
-        opacity: pointOpacity
-      }));
     }
+    return ranges;
   }
 
-  // ============================================================================
-  // Line Rendering (viewport slicing)
-  // ============================================================================
+  // Liang-Barsky boolean: does segment (ax,ay)-(bx,by) cross rect
+  // [x0,y0,x1,y1]? Only consulted for segments with BOTH endpoints outside
+  // the rect but on different sides - a long segment (a flight leg) can
+  // cross the viewport without any vertex inside it.
+  function segmentCrossesRect(ax, ay, bx, by, x0, y0, x1, y1) {
+    let t0 = 0, t1 = 1;
+    const dx = bx - ax, dy = by - ay;
+    const p = [-dx, dx, -dy, dy];
+    const q = [ax - x0, x1 - ax, ay - y0, y1 - ay];
+    for (let k = 0; k < 4; k++) {
+      if (p[k] === 0) {
+        if (q[k] < 0) return false;
+      } else {
+        const r = q[k] / p[k];
+        if (p[k] < 0) {
+          if (r > t1) return false;
+          if (r > t0) t0 = r;
+        } else {
+          if (r < t0) return false;
+          if (r < t1) t1 = r;
+        }
+      }
+    }
+    return true;
+  }
 
-  // Contiguous per user/device tracks for the line layer; rebuilt by
-  // redrawMap when the data changes
-  let lineTracks = [];
-  // Padded viewport bounds recorded by the last slice, used to decide
-  // when a pan has left the sliced region
-  let lineSliceBounds = null;
+  // Canvas renderer for route lines, batched like the point cloud: zero
+  // Leaflet path layers, one _draw() pass over the shared projected-point
+  // cache. Draws the full geometry: true off-screen endpoints (runs extend
+  // one vertex past the padded canvas on each side, along the true
+  // segments), long segments crossing the view with no vertex inside it,
+  // and NO vertex-count cap. The previous implementation sliced tracks to
+  // the padded viewport and decimated with an escalating pixel tolerance
+  // until under a 10k-vertex cap - several full passes over every loaded
+  // point per zoom/pan (the lag), and the escalated tolerance smoothed
+  // tens of metres to over a kilometre of real geometry at dense zooms
+  // (the accuracy loss).
+  //
+  // The one concession to raster cost here is Douglas-Peucker vertex
+  // simplification at a FIXED sub-pixel screen tolerance: dropped vertices
+  // lie within LINE_SIMPLIFY_TOL pixels of the drawn chord, at every zoom,
+  // by construction - invisible by definition, and never escalating. At
+  // close zoom (consecutive points several pixels apart) it keeps
+  // essentially everything; straight corridors zoomed out collapse to
+  // their corners. Stroking every raw vertex instead would be exact but
+  // costs seconds per redraw at mid zoom (hundreds of thousands of
+  // sub-pixel joins).
+  const LINE_SIMPLIFY_TOL = 0.75; // px on screen
 
-  // Upper bound on line vertices handed to Leaflet per render. Leaflet
-  // re-runs its per-vertex pipeline (project + clip + draw) over every
-  // vertex on the canvas at each zoom change, so this cap is what keeps
-  // zooming responsive in the densest clusters; the adaptive tolerance
-  // softens just enough to get under it
-  const LINE_VERTEX_CAP = 10000;
+  // Progressive line rendering knobs. Chrome's software rasterizer handles
+  // a path with a few hundred segments fine but degrades superlinearly on
+  // huge single paths - at dense zooms the visible geometry can be 100k+
+  // segments (tens of millions of stroked pixels; 16 years of tracks
+  // crossing one view), and rendering them in one go froze the map for
+  // ~1s per pan-end/zoom-step. Three mitigations, none of which change a
+  // single drawn pixel:
+  //   - LINE_SETTLE_MS: after pan/zoom, hold the last bitmap glued to the
+  //     geography (the same transform the zoom animation applies) and only
+  //     rebuild once interaction has been quiet - a zoom burst re-renders
+  //     once, not once per wheel tick
+  //   - LINE_FRAME_SEG: the rebuild strokes segments spread across
+  //     animation frames, so no frame blocks; lines finish drawing shortly
+  //     after the view settles
+  //   - LINE_CHUNK_SEG: segments per stroke() call, small enough to stay
+  //     off the rasterizer's huge-path cliff
+  const LINE_SETTLE_MS = 150;
+  const LINE_FRAME_SEG = 1500;
+  const LINE_CHUNK_SEG = 500;
 
-  // Slice tracks to the padded viewport and decimate to roughly the
-  // given pixel tolerance, so the polyline handed to Leaflet is
-  // proportional to the visible screen area rather than the total
-  // dataset. Leaflet's per-vertex pipeline over every loaded point is
-  // what made line redraws after zoom take ~1s at 78k points.
-  function computeLineSlices() {
-    const b = state.map.getBounds().pad(0.5);
-    const west = b.getWest();
-    const east = b.getEast();
-    const north = b.getNorth();
-    const south = b.getSouth();
-    const wraps = west > east; // padded viewport crossing the antimeridian
-    lineSliceBounds = { west, east, north, south, wraps };
-    const inView = makeBoundsTest(west, east, north, south);
+  const LineCloudRenderer = L.Canvas.extend({
+    _pts: null,       // state.data.filtered or null
+    _ranges: null,    // track index ranges (see splitIntoTracks)
+    _style: null,     // {color, weight, opacity, lut, altMin, altRange}
+    _altIdx: null,    // Uint16Array colour index per point (altitude mode)
+    _keep: null,      // Uint8Array DP keep flags, reused
+    _stack: null,     // Int32Array DP worklist, reused
+    _segs: null,      // Float64Array [x1,y1,x2,y2] per segment, reused
+    _segBrk: null,    // Uint8Array: 1 = segment starts a new polyline chain
+    _segColor: null,  // Uint16Array per-segment colour index (altitude mode)
+    _segsN: 0,
+    _settleTimer: null,
+    _prog: null,      // progressive stroke state { i, raf }
 
-    const worldPx = 256 * Math.pow(2, state.map.getZoom());
-
-    // One decimation pass at a given pixel tolerance. The tolerance is
-    // expressed in degrees of longitude; latitude distances are scaled
-    // per point by the local Mercator factor (1/cos(lat)).
-    const sliceAt = (tolPx) => {
-      const tolSq = Math.pow(tolPx * 360 / worldPx, 2);
-      const slices = [];
-
-      for (const track of lineTracks) {
-        let run = null; // current visible run of source points
-        let lastLat = 0;
-        let lastLng = 0;
-
-        const flush = () => {
-          if (run && run.length > 1) slices.push(run);
-          run = null;
-        };
-
-        for (let i = 0; i < track.length; i++) {
-          const p = track[i];
-
-          if (!inView(p)) {
-            // Keep one out-of-view point at a boundary crossing so the
-            // visible end of the track still connects correctly (the
-            // renderer clips it at the canvas edge)
-            if (run) {
-              run.push(p);
-              flush();
+    setTracks(points, ranges, style) {
+      if (!points || !ranges || ranges.length === 0) {
+        this._pts = null;
+        this._ranges = null;
+        this._style = null;
+        this._altIdx = null;
+      } else {
+        this._pts = points;
+        this._ranges = ranges;
+        this._style = style;
+        if (style.lut) {
+          // Per-point gradient colour as an index; 256 = no altitude
+          // reported, matching the old per-segment fallback to lineColor
+          const idx = new Uint16Array(points.length);
+          for (let i = 0; i < points.length; i++) {
+            const alt = points[i].alt;
+            if (typeof alt === 'number' && !Number.isNaN(alt)) {
+              const t = (alt - style.altMin) / style.altRange;
+              idx[i] = t <= 0 ? 0 : t >= 1 ? 255 : (t * 255) | 0;
+            } else {
+              idx[i] = 256;
             }
-            continue;
           }
+          this._altIdx = idx;
+        } else {
+          this._altIdx = null;
+        }
+      }
+      this._requestRender(true);
+    },
 
-          // First point of a run is always kept
-          if (!run) {
-            run = [p];
-            lastLat = p.lat;
-            lastLng = p.lon;
-            continue;
+    // -- Render scheduling -------------------------------------------------
+    //
+    // View-driven renders (pan-end, zoom-end) go through a settle window:
+    // the last-rendered bitmap is held glued to the geography (scaled and
+    // translated by the same math the zoom animation applies), and the
+    // real rebuild happens once interaction has been quiet for
+    // LINE_SETTLE_MS - a zoom burst re-renders once instead of once per
+    // wheel tick. Data/style changes render immediately.
+
+    _update() {
+      if (!this._map) return;
+      if (this._map._animatingZoom && this._bounds) return; // zoomanim handles the transform
+      this._requestRender(false);
+    },
+
+    _reset() {
+      this._update();
+    },
+
+    _requestRender(immediate) {
+      if (!this._map) return;
+      this._cancelRender();
+      if (immediate) {
+        this._startRender();
+        return;
+      }
+      this._holdBitmap();
+      this._settleTimer = setTimeout(() => {
+        this._settleTimer = null;
+        this._startRender();
+      }, LINE_SETTLE_MS);
+    },
+
+    _cancelRender() {
+      if (this._settleTimer !== null) {
+        clearTimeout(this._settleTimer);
+        this._settleTimer = null;
+      }
+      if (this._prog) {
+        cancelAnimationFrame(this._prog.raf);
+        this._prog = null;
+      }
+    },
+
+    // Keep the current bitmap aligned with the view using the renderer's
+    // recorded center/zoom from the last real render
+    _holdBitmap() {
+      if (this._bounds && this._container) {
+        this._updateTransform(this._map.getCenter(), this._map.getZoom());
+      }
+    },
+
+    // -- The real render ----------------------------------------------------
+    //
+    // Collect every segment to draw (visibility runs + DP simplification
+    // + crossing tests), stroke them progressively into an OFFSCREEN work
+    // canvas, then commit atomically. The visible canvas keeps showing the
+    // last committed render (held to the view by the CSS transform) until
+    // the fresh one is complete - lines never flash off while redrawing.
+
+    _startRender() {
+      const map = this._map;
+      if (!map) return;
+      this._cancelRender();
+      if (map._animatingZoom) {
+        // Rare: asked to render mid-animation - retry after it settles
+        this._settleTimer = setTimeout(() => {
+          this._settleTimer = null;
+          this._startRender();
+        }, LINE_SETTLE_MS);
+        return;
+      }
+
+      const size = map.getSize();
+      const p = this.options.padding;
+      const min = map.containerPointToLayerPoint(size.multiplyBy(-p)).round();
+      const bounds = new L.Bounds(min, min.add(size.multiplyBy(1 + p * 2)).round());
+      const px = bounds.getSize();
+      const m = L.Browser.retina ? 2 : 1;
+
+      if (!this._pts || !this._ranges) {
+        // Nothing to draw: clear the visible canvas immediately
+        this._adoptPending(bounds, map.getCenter(), map.getZoom(), m);
+        const container = this._container;
+        L.DomUtil.setPosition(container, bounds.min);
+        container.width = m * px.x;
+        container.height = m * px.y;
+        container.style.width = px.x + 'px';
+        container.style.height = px.y + 'px';
+        this._ctx.setTransform(m, 0, 0, m, -bounds.min.x * m, -bounds.min.y * m);
+        return;
+      }
+
+      if (!this._work) {
+        this._work = document.createElement('canvas');
+        this._wctx = this._work.getContext('2d');
+      }
+      if (this._work.width !== m * px.x || this._work.height !== m * px.y) {
+        this._work.width = m * px.x;
+        this._work.height = m * px.y;
+      } else {
+        // Same size as last render: the width assignment above isn't there
+        // to clear it, so wipe explicitly - stale segments must not
+        // accumulate under the new frame
+        this._wctx.setTransform(1, 0, 0, 1, 0, 0);
+        this._wctx.clearRect(0, 0, this._work.width, this._work.height);
+      }
+      this._wctx.setTransform(m, 0, 0, m, -bounds.min.x * m, -bounds.min.y * m);
+      // Bookkeeping (bounds/center/zoom the hold transform works from) only
+      // becomes official at commit - a cancelled render must leave the
+      // renderer describing the bitmap that is actually on screen
+      this._pending = { bounds, center: map.getCenter(), zoom: map.getZoom(), m };
+
+      if (!this._pts || !this._ranges) return;
+
+      const proj = getProjectedPoints();
+      const n = this._pts.length;
+      if (!this._keep || this._keep.length < n) {
+        this._keep = new Uint8Array(n);
+      }
+      if (!this._segs || this._segs.length < n * 4) {
+        this._segs = new Float64Array(n * 4);
+        this._segBrk = new Uint8Array(n);
+        this._segColor = new Uint16Array(n);
+      }
+
+      // Collect visible segments. Chain breaks (new moveTo) preserve
+      // joined runs; colour indexes ride along for the gradient mode.
+      const segs = this._segs, brk = this._segBrk, segColor = this._segColor;
+      const altIdx = this._altIdx;
+      let w = 0, s = 0, pendingMove = true;
+      this._drawVisibleRuns(proj, bounds.min.x, bounds.min.y, bounds.max.x, bounds.max.y,
+        () => { pendingMove = true; },
+        (a, bIdx) => {
+          segs[w++] = proj[a * 2];
+          segs[w++] = proj[a * 2 + 1];
+          segs[w++] = proj[bIdx * 2];
+          segs[w++] = proj[bIdx * 2 + 1];
+          brk[s] = pendingMove ? 1 : 0;
+          segColor[s] = altIdx ? altIdx[a] : 0;
+          pendingMove = false;
+          s++;
+        });
+      this._segsN = s;
+
+      // Gradient mode: group segments by colour (counting sort) so the
+      // progressive stroke switches styles at most 257 times
+      if (altIdx && s > 0) {
+        const counts = new Uint32Array(257);
+        for (let j = 0; j < s; j++) counts[segColor[j]]++;
+        const cursor = new Uint32Array(257);
+        let acc = 0;
+        for (let c = 0; c < 257; c++) { cursor[c] = acc; acc += counts[c]; }
+        if (!this._sortSegs || this._sortSegs.length < n * 4) {
+          this._sortSegs = new Float64Array(n * 4);
+          this._sortBrk = new Uint8Array(n);
+          this._sortColor = new Uint16Array(n);
+        }
+        const dS = this._sortSegs, dB = this._sortBrk, dC = this._sortColor;
+        for (let j = 0; j < s; j++) {
+          const dst = cursor[segColor[j]]++;
+          dS[dst * 4] = segs[j * 4];
+          dS[dst * 4 + 1] = segs[j * 4 + 1];
+          dS[dst * 4 + 2] = segs[j * 4 + 2];
+          dS[dst * 4 + 3] = segs[j * 4 + 3];
+          dB[dst] = brk[j];
+          dC[dst] = segColor[j];
+        }
+        this._segs = dS; this._segBrk = dB; this._segColor = dC;
+        // keep the unsorted buffers as scratch for the next sort
+        this._sortSegs = segs; this._sortBrk = brk; this._sortColor = segColor;
+      }
+
+      this._prog = { i: 0, raf: 0 };
+      this._progStep();
+    },
+
+    // Make a pending view official (used when the visible canvas is being
+    // replaced synchronously)
+    _adoptPending(bounds, center, zoom, m) {
+      this._bounds = bounds;
+      this._center = center;
+      this._zoom = zoom;
+    },
+
+    // Atomically replace the visible bitmap with the finished work canvas.
+    // The clear (width assignment) and the blit happen in the same task, so
+    // the compositor only ever presents the complete new frame.
+    _commit() {
+      const pend = this._pending;
+      this._pending = null;
+      if (!pend || !this._map || !this._work) return;
+      const b = pend.bounds;
+      const px = b.getSize();
+      const m = pend.m;
+      this._adoptPending(b, pend.center, pend.zoom, m);
+      const container = this._container;
+      L.DomUtil.setPosition(container, b.min); // also clears the hold transform
+      container.width = m * px.x;
+      container.height = m * px.y;
+      container.style.width = px.x + 'px';
+      container.style.height = px.y + 'px';
+      const ctx = this._ctx;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.drawImage(this._work, 0, 0);
+      ctx.setTransform(m, 0, 0, m, -b.min.x * m, -b.min.y * m);
+    },
+
+    // Stroke up to LINE_FRAME_SEG segments, then hand the rest to the next
+    // animation frame - no frame ever blocks on the full raster
+    _progStep() {
+      const prog = this._prog;
+      if (!prog || !this._wctx || !this._map || !this._pending) { this._prog = null; return; }
+      const ctx = this._wctx;
+      const segs = this._segs, brk = this._segBrk, segColor = this._segColor;
+      const style = this._style;
+      const end = Math.min(prog.i + LINE_FRAME_SEG, this._segsN);
+
+      ctx.lineWidth = style.weight;
+      ctx.globalAlpha = style.opacity;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+
+      let i = prog.i;
+      const applyColor = (c) => {
+        ctx.strokeStyle = c === 256 ? style.color : (style.lut ? style.lut[c] : style.color);
+      };
+      applyColor(segColor[i]);
+      let curColor = segColor[i];
+
+      let inChunk = 0;
+      ctx.beginPath();
+      while (i < end) {
+        const c = segColor[i];
+        if (c !== curColor) {
+          ctx.stroke();
+          ctx.beginPath();
+          applyColor(c);
+          curColor = c;
+          inChunk = 0;
+        } else if (inChunk >= LINE_CHUNK_SEG) {
+          ctx.stroke();
+          ctx.beginPath();
+          inChunk = 0;
+        }
+        if (brk[i] || inChunk === 0) {
+          ctx.moveTo(segs[i * 4], segs[i * 4 + 1]);
+        }
+        ctx.lineTo(segs[i * 4 + 2], segs[i * 4 + 3]);
+        inChunk++;
+        i++;
+      }
+      ctx.stroke();
+
+      prog.i = i;
+      if (i < this._segsN) {
+        prog.raf = requestAnimationFrame(() => this._progStep());
+      } else {
+        this._prog = null;
+        this._commit();
+      }
+    },
+
+    // Douglas-Peucker over proj[a..b] (inclusive), marking kept vertices
+    // in this._keep. Iterative with an explicit (reused) stack; endpoints
+    // are always kept.
+    _simplifyRange(proj, a, b, tolSq) {
+      const keep = this._keep;
+      keep[a] = 1;
+      keep[b] = 1;
+      let stack = this._stack;
+      if (!stack || stack.length < (b - a + 1) * 2) {
+        stack = this._stack = new Int32Array((b - a + 1) * 2);
+      }
+      let sp = 0;
+      stack[sp++] = a;
+      stack[sp++] = b;
+      while (sp > 0) {
+        const j = stack[--sp];
+        const i = stack[--sp];
+        if (j <= i + 1) continue;
+
+        // Vertex furthest from the chord i..j
+        const ax = proj[i * 2], ay = proj[i * 2 + 1];
+        const bx = proj[j * 2], by = proj[j * 2 + 1];
+        const abx = bx - ax, aby = by - ay;
+        const abLenSq = abx * abx + aby * aby;
+        let maxD = -1, maxK = -1;
+        for (let k = i + 1; k < j; k++) {
+          const kx = proj[k * 2], ky = proj[k * 2 + 1];
+          let d;
+          if (abLenSq === 0) {
+            const dx = kx - ax, dy = ky - ay;
+            d = dx * dx + dy * dy;
+          } else {
+            // Perpendicular distance to the (infinite) line through a,b,
+            // scaled by |ab|: |cross| / |ab| -> |cross|^2 / abLenSq
+            const cx = kx - ax, cy = ky - ay;
+            const cross = cx * aby - cy * abx;
+            d = (cross * cross) / abLenSq;
           }
+          if (d > maxD) { maxD = d; maxK = k; }
+        }
+        if (maxD >= tolSq) {
+          keep[maxK] = 1;
+          stack[sp++] = i;
+          stack[sp++] = maxK;
+          stack[sp++] = maxK;
+          stack[sp++] = j;
+        }
+      }
+    },
 
-          // Distance from the last kept point in longitude-degree
-          // equivalents: latitude is scaled by the Mercator factor so
-          // the comparison matches the on-screen pixel tolerance
-          const dy = (p.lat - lastLat) / Math.cos(p.lat * Math.PI / 180);
-          const dx = p.lon - lastLng;
-          if (dx * dx + dy * dy >= tolSq) {
-            run.push(p);
-            lastLat = p.lat;
-            lastLng = p.lon;
+    // Collect visible runs of vertices (each extended one vertex past the
+    // padded rect on either side, so lines exit the canvas along their true
+    // segments), simplify each run, and hand the kept vertices to emit().
+    // emit(fromIdx, toIdx) adds one segment between two consecutive kept
+    // vertices; emitMove(i) starts a new run at vertex i.
+    _drawVisibleRuns(proj, x0, y0, x1, y1, emitMove, emit) {
+      const tolSq = LINE_SIMPLIFY_TOL * LINE_SIMPLIFY_TOL;
+      const keep = this._keep;
+
+      for (const range of this._ranges) {
+        const start = range[0], end = range[1];
+        let i = start;
+        while (i < end) {
+          // Advance to the next visible vertex
+          while (i < end && (proj[i * 2] < x0 || proj[i * 2] > x1 ||
+                             proj[i * 2 + 1] < y0 || proj[i * 2 + 1] > y1)) i++;
+          if (i >= end) break;
+
+          // Run of consecutive visible vertices
+          let j = i + 1;
+          while (j < end && proj[j * 2] >= x0 && proj[j * 2] <= x1 &&
+                              proj[j * 2 + 1] >= y0 && proj[j * 2 + 1] <= y1) j++;
+
+          // Extend one vertex past each end (when present) so the run
+          // connects to the off-screen geometry along its true segment
+          const runStart = i > start ? i - 1 : i;
+          const runEnd = j < end ? j : j - 1;
+          if (runEnd > runStart) {
+            keep.fill(0, runStart, runEnd + 1);
+            this._simplifyRange(proj, runStart, runEnd, tolSq);
+            let prevKept = -1;
+            for (let k = runStart; k <= runEnd; k++) {
+              if (!keep[k]) continue;
+              if (prevKept < 0) emitMove(k);
+              else emit(prevKept, k);
+              prevKept = k;
+            }
+          }
+          i = j;
+        }
+
+        // Segments crossing the rect with BOTH endpoints outside it - a
+        // long leg (e.g. a flight) can cross the whole view between two
+        // samples. Cheap outcode test first; full intersection test only
+        // for endpoints on different sides.
+        for (let k = start; k < end - 1; k++) {
+          const ax = proj[k * 2], ay = proj[k * 2 + 1];
+          const bx = proj[k * 2 + 2], by = proj[k * 2 + 3];
+          let ca = 0, cb = 0;
+          if (ax < x0) ca = 1; else if (ax > x1) ca = 2;
+          if (ay < y0) ca |= 8; else if (ay > y1) ca |= 4;
+          if (bx < x0) cb = 1; else if (bx > x1) cb = 2;
+          if (by < y0) cb |= 8; else if (by > y1) cb |= 4;
+          if (ca === 0 || cb === 0 || (ca & cb)) continue; // inside pair or same side
+          if (segmentCrossesRect(ax, ay, bx, by, x0, y0, x1, y1)) {
+            emitMove(k);
+            emit(k, k + 1);
           }
         }
-        flush();
       }
-
-      let verts = 0;
-      for (const s of slices) verts += s.length;
-      return { slices, verts };
-    };
-
-    // Start at a sub-pixel tolerance (visually lossless) and only
-    // escalate while the slice would still exceed the vertex cap
-    let tolPx = 0.5;
-    let sliced = sliceAt(tolPx);
-    while (sliced.verts > LINE_VERTEX_CAP) {
-      tolPx *= Math.max(1.5, Math.sqrt(sliced.verts / LINE_VERTEX_CAP));
-      sliced = sliceAt(tolPx);
     }
-    return sliced;
-  }
+  });
 
   function renderLines() {
     if (!state.map) return;
-    state.layers.lines.clearLayers();
-    if (lineTracks.length === 0) return;
 
-    // Shared polyline style. smoothFactor 0 keeps every slice vertex -
-    // Leaflet's default of 1 would re-simplify the already-sliced
-    // geometry at every zoom level
-    const lineStyle = {
-      color: getSetting('lineColor', '#3388ff'),
-      weight: getSetting('lineWidth', 3),
-      opacity: getSetting('lineOpacity', 0.7),
-      smoothFactor: 0,
-      renderer: state.layers.lineRenderer,
-      interactive: false
-    };
-
-    const { slices, verts: sliceVerts } = computeLineSlices();
-    if (sliceVerts === 0) return;
-
-    if (!getSetting('altitudeLinesEnabled', false)) {
-      for (const slice of slices) {
-        L.polyline(slice.map(p => [p.lat, p.lon]), lineStyle).addTo(state.layers.lines);
-      }
+    const points = state.data.filtered;
+    if (!getSetting('showLines', true) || points.length < 2 || lineTrackRanges.length === 0) {
+      state.layers.lineCloud.setTracks(null, null, null);
       return;
     }
 
-    // Altitude gradient: one multi-part polyline per gradient colour -
-    // the canvas renderer strokes one path per layer, not per segment
-    const linesLUT = buildAltitudeColorLUT(
-      getSetting('altitudeLinesLowColor', '#00ff00'),
-      getSetting('altitudeLinesHighColor', '#ff0000')
-    );
-    const altMin = getSetting('altitudeMin', 0);
-    const altMax = getSetting('altitudeMax', 1000);
-    const altRange = (altMax - altMin) || 1;
-    const segmentsByColor = new Map();
+    const style = {
+      color: getSetting('lineColor', '#3388ff'),
+      weight: getSetting('lineWidth', 3),
+      opacity: getSetting('lineOpacity', 0.7)
+    };
 
-    for (const slice of slices) {
-      for (let i = 0; i < slice.length - 1; i++) {
-        const p1 = slice[i];
-        const p2 = slice[i + 1];
-
-        const t = ((p1.alt || 0) - altMin) / altRange;
-        const color = linesLUT[t <= 0 ? 0 : t >= 1 ? 255 : (t * 255) | 0];
-
-        let parts = segmentsByColor.get(color);
-        if (!parts) {
-          parts = [];
-          segmentsByColor.set(color, parts);
-        }
-        parts.push([[p1.lat, p1.lon], [p2.lat, p2.lon]]);
-      }
+    if (getSetting('altitudeLinesEnabled', false)) {
+      style.lut = buildAltitudeColorLUT(
+        getSetting('altitudeLinesLowColor', '#00ff00'),
+        getSetting('altitudeLinesHighColor', '#ff0000')
+      );
+      const altMin = getSetting('altitudeMin', 0);
+      const altMax = getSetting('altitudeMax', 1000);
+      style.altMin = altMin;
+      style.altRange = (altMax - altMin) || 1;
     }
 
-    for (const [color, parts] of segmentsByColor) {
-      L.polyline(parts, { ...lineStyle, color }).addTo(state.layers.lines);
-    }
+    state.layers.lineCloud.setTracks(points, lineTrackRanges, style);
   }
 
   function removeHeatmap() {
@@ -3846,23 +4303,6 @@
     }
 
     return count;
-  }
-
-  function createPointMarker(lat, lng, options) {
-    const { fillColor = '#3388ff', radius = 2, opacity = 0.5 } = options;
-
-    // No stroke (weight 0) halves the paint cost per circle, and
-    // non-interactive markers keep the canvas renderer's hover/click
-    // hit-testing from scanning every point on each mouse event - map
-    // clicks are handled by handleProximityClick instead
-    return L.circleMarker([lat, lng], {
-      radius,
-      fillColor,
-      fillOpacity: opacity,
-      weight: 0,
-      renderer: state.layers.pointRenderer,
-      interactive: false
-    });
   }
 
   // 256-step colour lookup table between two hex colours. Built once per
@@ -3993,10 +4433,12 @@
     });
   }
 
-  // Projected layer points for the current zoom, cached until the zoom
-  // or the data changes. Layer points don't depend on panning, so this
-  // lets clicks compare in pixel space without re-projecting every
-  // point on each click.
+  // Projected layer points for the current zoom, cached until the zoom or
+  // the data changes. Layer points don't depend on panning, so this serves
+  // both the line renderer's draw passes and click proximity tests without
+  // re-projecting every point on each click. The projection is the inline
+  // mercator used by the point renderer - bit-identical to
+  // latLngToLayerPoint but without per-point L.LatLng/L.Point allocation.
   let projectedPointCache = null; // Float64Array [x0, y0, x1, y1, ...]
   let projectedPointCacheZoom = null;
 
@@ -4010,10 +4452,21 @@
     if (projectedPointCacheZoom !== zoom || !projectedPointCache) {
       const points = state.data.filtered;
       const cache = new Float64Array(points.length * 2);
+      const origin = state.map.getPixelOrigin();
+      const S = 256 * Math.pow(2, zoom);
+      const d = Math.PI / 180;
       for (let i = 0; i < points.length; i++) {
-        const lp = state.map.latLngToLayerPoint([points[i].lat, points[i].lon]);
-        cache[i * 2] = lp.x;
-        cache[i * 2 + 1] = lp.y;
+        const p = points[i];
+        let lon = p.lon;
+        if (lon < -180 || lon > 180) {
+          lon -= Math.floor((lon + 180) / 360) * 360;
+        }
+        const lat = p.lat;
+        const phi = lat > MERCATOR_MAX_LAT ? MERCATOR_MAX_LAT
+          : lat < -MERCATOR_MAX_LAT ? -MERCATOR_MAX_LAT : lat;
+        const sin = Math.sin(phi * d);
+        cache[i * 2] = Math.round((lon / 360 + 0.5) * S) - origin.x;
+        cache[i * 2 + 1] = Math.round((0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * S) - origin.y;
       }
       projectedPointCache = cache;
       projectedPointCacheZoom = zoom;
