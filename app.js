@@ -4176,6 +4176,31 @@
     }).join('');
   }
 
+  // Code-to-label mappings for OwnTracks fields shown in the point popup.
+  // Codes outside the maps fall through to the raw value.
+  const TRIGGER_LABELS = {
+    p: 'Ping',
+    c: 'Circular region',
+    C: 'Circular region (follow)',
+    b: 'Beacon region',
+    r: 'Report location',
+    u: 'Manual publish',
+    t: 'Timer (move mode)',
+    v: 'Frequent locations'
+  };
+  const BATTERY_STATUS_LABELS = { 0: 'Unknown', 1: 'Unplugged', 2: 'Charging', 3: 'Full' };
+  const CONN_LABELS = { w: 'WiFi', o: 'Offline', m: 'Mobile' };
+  const MONITORING_LABELS = { 1: 'Significant changes', 2: 'Move mode' };
+
+  function escapeHtml(value) {
+    return String(value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   function createPopupContent(point) {
     const dateStr = new Date(point.tst * 1000).toLocaleString('en-GB', {
       day: 'numeric',
@@ -4187,29 +4212,84 @@
       hour12: false
     });
 
+    // iOS sends SSID/BSSID uppercase; Android and older payloads lowercase.
+    const ssid = point.ssid || point.SSID;
+    const bssid = point.bssid || point.BSSID;
+    const motion = Array.isArray(point.motionactivities)
+      ? point.motionactivities.filter(Boolean).join(', ')
+      : '';
+    const trigger = point.t ? (TRIGGER_LABELS[point.t] || point.t) : null;
+    const battStatus = point.bs != null ? (BATTERY_STATUS_LABELS[point.bs] || point.bs) : null;
+    const conn = point.conn ? (CONN_LABELS[point.conn] || point.conn) : null;
+    const monitoring = point.m != null ? (MONITORING_LABELS[point.m] || point.m) : null;
+
     let content = `<div style="min-width: 200px;">`;
     content += `<div style="margin-bottom: 8px;">${dateStr}</div>`;
+
+    if (point.tid) {
+      content += `<div><strong>Tracker:</strong> ${escapeHtml(point.tid)}</div>`;
+    }
+
     content += `<div><strong>Lat:</strong> ${point.lat.toFixed(6)}</div>`;
     content += `<div><strong>Lon:</strong> ${point.lon.toFixed(6)}</div>`;
 
+    if (trigger) {
+      content += `<div><strong>Trigger:</strong> ${escapeHtml(trigger)}</div>`;
+    }
+
     if (point.alt !== undefined && point.alt !== null) {
-      content += `<div><strong>Altitude:</strong> ${point.alt} m</div>`;
+      const vacSuffix = point.vac !== undefined && point.vac !== null ? ` (±${point.vac} m)` : '';
+      content += `<div><strong>Altitude:</strong> ${point.alt} m${vacSuffix}</div>`;
+    } else if (point.vac !== undefined && point.vac !== null) {
+      content += `<div><strong>Vert. accuracy:</strong> ${point.vac} m</div>`;
     }
 
     if (point.acc !== undefined && point.acc !== null) {
       content += `<div><strong>Accuracy:</strong> ${point.acc} m</div>`;
     }
 
+    if (point.vel !== undefined && point.vel !== null) {
+      content += `<div><strong>Velocity:</strong> ${point.vel} km/h</div>`;
+    }
+
+    if (point.cog !== undefined && point.cog !== null) {
+      content += `<div><strong>Course:</strong> ${point.cog}°</div>`;
+    }
+
+    if (motion) {
+      content += `<div><strong>Motion:</strong> ${escapeHtml(motion)}</div>`;
+    }
+
+    if (monitoring) {
+      content += `<div><strong>Monitoring:</strong> ${escapeHtml(monitoring)}</div>`;
+    }
+
     if (point.batt !== undefined && point.batt !== null) {
-      content += `<div><strong>Battery:</strong> ${point.batt}%</div>`;
+      const statusSuffix = battStatus ? ` (${battStatus})` : '';
+      content += `<div><strong>Battery:</strong> ${point.batt}%${statusSuffix}</div>`;
+    } else if (battStatus) {
+      content += `<div><strong>Battery status:</strong> ${battStatus}</div>`;
+    }
+
+    if (conn) {
+      content += `<div><strong>Connection:</strong> ${escapeHtml(conn)}</div>`;
+    }
+
+    if (ssid) {
+      const bssidSuffix = bssid ? ` (${escapeHtml(bssid)})` : '';
+      content += `<div><strong>WiFi:</strong> ${escapeHtml(ssid)}${bssidSuffix}</div>`;
+    }
+
+    if (point.p !== undefined && point.p !== null) {
+      content += `<div><strong>Pressure:</strong> ${point.p} kPa</div>`;
+    }
+
+    if (point.rad !== undefined && point.rad !== null) {
+      content += `<div><strong>Region radius:</strong> ${point.rad} m</div>`;
     }
 
     if (point.addr) {
-      content += `<div><strong>Address:</strong> ${point.addr}</div>`;
-    }
-
-    if (point.ssid) {
-      content += `<div><strong>WiFi:</strong> ${point.ssid}</div>`;
+      content += `<div><strong>Address:</strong> ${escapeHtml(point.addr)}</div>`;
     }
 
     content += `</div>`;
