@@ -224,7 +224,7 @@ The point, line, and heatmap settings each live behind their own collapsible dro
 
 ### Points
 - Customize color/size/opacity (visibility via the quick actions dock)
-- Click a point for a detail popup (time, position, altitude, accuracy, battery)
+- Click a point for a detail popup (time, position, accuracy, altitude, battery, plus any other recorded fields including velocity and course when present)
 
 ### Lines
 - Customize color/width/opacity (visibility via the quick actions dock)

@@ -2383,9 +2383,9 @@
 
       document.getElementById('qaRecenter').disabled = false;
 
-      // Single pass for time range, accuracy range and altitude range. No
-      // Math.min(...spread): spreading a large array exceeds the argument
-      // limit (issue #3)
+      // Single pass for time range, accuracy range and altitude range.
+      // No Math.min(...spread): spreading a large array
+      // exceeds the argument limit (issue #3)
       let tstMin = Infinity;
       let tstMax = -Infinity;
       let accMin = Infinity;
@@ -3354,17 +3354,18 @@
   // the per-marker rendering they replaced.
   const PointCloudRenderer = L.Canvas.extend({
     _pts: null,       // source points (state.data.filtered) or null
-    _style: null,     // {color, radius, opacity, lut, altMin, altRange}
-    _colorIdx: null,  // Uint16Array sprite index per point (altitude mode)
+    _style: null,     // {color, radius, opacity, lut, valueKey, valMin, valRange}
+    _colorIdx: null,  // Uint16Array sprite index per point (gradient mode)
     _sprites: null,   // sprite canvases, indexed by colour
     _spriteKey: '',   // style signature the sprites were built for
     _px: null,        // Float64Array [x0, y0, x1, y1...] of visible points
     _pxIdx: null,     // Uint16Array sprite index per visible point
     _grid: null,      // Uint8Array dedup grid, reused across redraws
 
-    // points: array of {lat, lon, alt?}; null/empty hides the layer.
+    // points: array of {lat, lon, alt?, vel?}; null/empty hides the layer.
     // style: {color, radius, opacity, lut (256-entry hex array or null),
-    // altMin, altRange} - the LUT turns on per-point altitude colours
+    // valueKey, valMin, valRange} - the LUT turns on per-point gradient
+    // colours over the point field named by valueKey
     setData(points, style) {
       if (!points || points.length === 0) {
         this._pts = null;
@@ -3373,13 +3374,14 @@
         this._pts = points;
         this._style = style;
         if (style.lut) {
-          // Gradient colour as a sprite index; 256 = no altitude reported
-          // (base colour), matching the old per-marker fallback
+          // Gradient colour as a sprite index; 256 = no value for the
+          // gradient's field (base colour), matching the old per-marker fallback
           const idx = new Uint16Array(points.length);
+          const key = style.valueKey;
           for (let i = 0; i < points.length; i++) {
-            const alt = points[i].alt;
-            if (typeof alt === 'number' && !Number.isNaN(alt)) {
-              const t = (alt - style.altMin) / style.altRange;
+            const v = points[i][key];
+            if (typeof v === 'number' && !Number.isNaN(v)) {
+              const t = (v - style.valMin) / style.valRange;
               idx[i] = t <= 0 ? 0 : t >= 1 ? 255 : (t * 255) | 0;
             } else {
               idx[i] = 256;
@@ -3395,8 +3397,10 @@
 
     _ensureSprites() {
       const style = this._style;
+      // LUT end colours are part of the key: a gradient recolour must
+      // rebuild the sprites even when radius/opacity/base colour stand still
       const key = style.radius + '|' + style.opacity + '|' + style.color +
-        '|' + (style.lut ? 'lut' : 'flat');
+        '|' + (style.lut ? 'lut:' + style.lut[0] + style.lut[255] : 'flat');
       if (this._sprites && this._spriteKey === key) return;
 
       // Sprites render at device resolution so the blit is 1:1 on retina
@@ -3497,7 +3501,7 @@
   });
 
   // Feed the point-cloud renderer: just data + style (culling and
-  // altitude colouring are decided inside the renderer's draw pass)
+  // gradient colouring are decided inside the renderer's draw pass)
   function renderPoints() {
     if (!state.map) return;
 
@@ -3507,19 +3511,25 @@
       return;
     }
 
-    const altMin = setting('altitudeMin');
-    const altMax = setting('altitudeMax');
-
-    state.layers.pointCloud.setData(points, {
+    const style = {
       color: setting('pointColor'),
       radius: setting('pointSize'),
-      opacity: setting('pointOpacity'),
-      lut: setting('altitudeEnabled') ? buildAltitudeColorLUT(
+      opacity: setting('pointOpacity')
+    };
+
+    if (setting('altitudeEnabled')) {
+      const altMin = setting('altitudeMin');
+      const altMax = setting('altitudeMax');
+      style.lut = buildGradientColorLUT(
         setting('altitudePointsLowColor'),
-        setting('altitudePointsHighColor')) : null,
-      altMin,
-      altRange: (altMax - altMin) || 1
-    });
+        setting('altitudePointsHighColor')
+      );
+      style.valueKey = 'alt';
+      style.valMin = altMin;
+      style.valRange = (altMax - altMin) || 1;
+    }
+
+    state.layers.pointCloud.setData(points, style);
   }
 
   // ============================================================================
@@ -3611,13 +3621,12 @@
   const LineCloudRenderer = L.Canvas.extend({
     _pts: null,       // state.data.filtered or null
     _ranges: null,    // track index ranges (see splitIntoTracks)
-    _style: null,     // {color, weight, opacity, lut, altMin, altRange}
-    _altIdx: null,    // Uint16Array colour index per point (altitude mode)
+    _style: null,     // {color, weight, opacity, lut, valueKey, valMin, valRange, segEndValue}
+    _valIdx: null,    // Uint16Array colour index per point (gradient mode)
     _keep: null,      // Uint8Array DP keep flags, reused
     _stack: null,     // Int32Array DP worklist, reused
     _segs: null,      // Float64Array [x1,y1,x2,y2] per segment, reused
-    _segBrk: null,    // Uint8Array: 1 = segment starts a new polyline chain
-    _segColor: null,  // Uint16Array per-segment colour index (altitude mode)
+    _segColor: null,  // Uint16Array per-segment colour index (gradient mode)
     _segsN: 0,
     _settleTimer: null,
     _prog: null,      // progressive stroke state { i, raf }
@@ -3627,27 +3636,28 @@
         this._pts = null;
         this._ranges = null;
         this._style = null;
-        this._altIdx = null;
+        this._valIdx = null;
       } else {
         this._pts = points;
         this._ranges = ranges;
         this._style = style;
         if (style.lut) {
-          // Per-point gradient colour as an index; 256 = no altitude
-          // reported, matching the old per-segment fallback to lineColor
+          // Per-point gradient colour as an index; 256 = no value for the
+          // gradient's field, matching the old per-segment fallback to lineColor
           const idx = new Uint16Array(points.length);
+          const key = style.valueKey;
           for (let i = 0; i < points.length; i++) {
-            const alt = points[i].alt;
-            if (typeof alt === 'number' && !Number.isNaN(alt)) {
-              const t = (alt - style.altMin) / style.altRange;
+            const v = points[i][key];
+            if (typeof v === 'number' && !Number.isNaN(v)) {
+              const t = (v - style.valMin) / style.valRange;
               idx[i] = t <= 0 ? 0 : t >= 1 ? 255 : (t * 255) | 0;
             } else {
               idx[i] = 256;
             }
           }
-          this._altIdx = idx;
+          this._valIdx = idx;
         } else {
-          this._altIdx = null;
+          this._valIdx = null;
         }
       }
       this._requestRender(true);
@@ -3768,32 +3778,35 @@
       }
       if (!this._segs || this._segs.length < n * 4) {
         this._segs = new Float64Array(n * 4);
-        this._segBrk = new Uint8Array(n);
         this._segColor = new Uint16Array(n);
       }
 
-      // Collect visible segments. Chain breaks (new moveTo) preserve
-      // joined runs; colour indexes ride along for the gradient mode.
-      const segs = this._segs, brk = this._segBrk, segColor = this._segColor;
-      const altIdx = this._altIdx;
-      let w = 0, s = 0, pendingMove = true;
+      // Collect visible segments; colour indexes ride along for the
+      // gradient mode. Path chaining is decided later by GEOMETRY (a
+      // segment continues the stroke only when it starts where the
+      // previous one ended), so runs need no explicit break markers
+      const segs = this._segs, segColor = this._segColor;
+      const valIdx = this._valIdx;
+      // segEndValue selects the arrival point's value instead of the
+      // departure point's (for rate-like values measured along the
+      // segment); altitude leaves it unset, reading the altitude the
+      // segment starts at
+      const segEnd = valIdx && this._style.segEndValue;
+      let w = 0, s = 0;
       this._drawVisibleRuns(proj, bounds.min.x, bounds.min.y, bounds.max.x, bounds.max.y,
-        () => { pendingMove = true; },
         (a, bIdx) => {
           segs[w++] = proj[a * 2];
           segs[w++] = proj[a * 2 + 1];
           segs[w++] = proj[bIdx * 2];
           segs[w++] = proj[bIdx * 2 + 1];
-          brk[s] = pendingMove ? 1 : 0;
-          segColor[s] = altIdx ? altIdx[a] : 0;
-          pendingMove = false;
+          segColor[s] = valIdx ? valIdx[segEnd ? bIdx : a] : 0;
           s++;
         });
       this._segsN = s;
 
       // Gradient mode: group segments by colour (counting sort) so the
       // progressive stroke switches styles at most 257 times
-      if (altIdx && s > 0) {
+      if (valIdx && s > 0) {
         const counts = new Uint32Array(257);
         for (let j = 0; j < s; j++) counts[segColor[j]]++;
         const cursor = new Uint32Array(257);
@@ -3801,22 +3814,20 @@
         for (let c = 0; c < 257; c++) { cursor[c] = acc; acc += counts[c]; }
         if (!this._sortSegs || this._sortSegs.length < n * 4) {
           this._sortSegs = new Float64Array(n * 4);
-          this._sortBrk = new Uint8Array(n);
           this._sortColor = new Uint16Array(n);
         }
-        const dS = this._sortSegs, dB = this._sortBrk, dC = this._sortColor;
+        const dS = this._sortSegs, dC = this._sortColor;
         for (let j = 0; j < s; j++) {
           const dst = cursor[segColor[j]]++;
           dS[dst * 4] = segs[j * 4];
           dS[dst * 4 + 1] = segs[j * 4 + 1];
           dS[dst * 4 + 2] = segs[j * 4 + 2];
           dS[dst * 4 + 3] = segs[j * 4 + 3];
-          dB[dst] = brk[j];
           dC[dst] = segColor[j];
         }
-        this._segs = dS; this._segBrk = dB; this._segColor = dC;
+        this._segs = dS; this._segColor = dC;
         // keep the unsorted buffers as scratch for the next sort
-        this._sortSegs = segs; this._sortBrk = brk; this._sortColor = segColor;
+        this._sortSegs = segs; this._sortColor = segColor;
       }
 
       this._prog = { i: 0, raf: 0 };
@@ -3860,7 +3871,7 @@
       const prog = this._prog;
       if (!prog || !this._wctx || !this._map || !this._pending) { this._prog = null; return; }
       const ctx = this._wctx;
-      const segs = this._segs, brk = this._segBrk, segColor = this._segColor;
+      const segs = this._segs, segColor = this._segColor;
       const style = this._style;
       const end = Math.min(prog.i + LINE_FRAME_SEG, this._segsN);
 
@@ -3876,6 +3887,13 @@
       applyColor(segColor[i]);
       let curColor = segColor[i];
 
+      // A segment continues the current stroke only when it starts
+      // exactly where the previous one ended. The colour sort groups
+      // strangers from different parts of the track (or different tracks)
+      // into the same stroke run; chaining those with lineTo would draw
+      // spurious connector lines across the map. Shared endpoints are
+      // copies of the same projected Float64, so === is exact
+      let peX = NaN, peY = NaN;
       let inChunk = 0;
       ctx.beginPath();
       while (i < end) {
@@ -3891,10 +3909,12 @@
           ctx.beginPath();
           inChunk = 0;
         }
-        if (brk[i] || inChunk === 0) {
+        if (inChunk === 0 || segs[i * 4] !== peX || segs[i * 4 + 1] !== peY) {
           ctx.moveTo(segs[i * 4], segs[i * 4 + 1]);
         }
         ctx.lineTo(segs[i * 4 + 2], segs[i * 4 + 3]);
+        peX = segs[i * 4 + 2];
+        peY = segs[i * 4 + 3];
         inChunk++;
         i++;
       }
@@ -3963,8 +3983,9 @@
     // padded rect on either side, so lines exit the canvas along their true
     // segments), simplify each run, and hand the kept vertices to emit().
     // emit(fromIdx, toIdx) adds one segment between two consecutive kept
-    // vertices; emitMove(i) starts a new run at vertex i.
-    _drawVisibleRuns(proj, x0, y0, x1, y1, emitMove, emit) {
+    // vertices; stroke-side continuity is decided by shared endpoints,
+    // so runs need no explicit start marker
+    _drawVisibleRuns(proj, x0, y0, x1, y1, emit) {
       const tolSq = LINE_SIMPLIFY_TOL * LINE_SIMPLIFY_TOL;
       const keep = this._keep;
 
@@ -3992,8 +4013,7 @@
             let prevKept = -1;
             for (let k = runStart; k <= runEnd; k++) {
               if (!keep[k]) continue;
-              if (prevKept < 0) emitMove(k);
-              else emit(prevKept, k);
+              if (prevKept >= 0) emit(prevKept, k);
               prevKept = k;
             }
           }
@@ -4014,7 +4034,6 @@
           if (by < y0) cb |= 8; else if (by > y1) cb |= 4;
           if (ca === 0 || cb === 0 || (ca & cb)) continue; // inside pair or same side
           if (segmentCrossesRect(ax, ay, bx, by, x0, y0, x1, y1)) {
-            emitMove(k);
             emit(k, k + 1);
           }
         }
@@ -4040,12 +4059,13 @@
     if (setting('altitudeLinesEnabled')) {
       const altMin = setting('altitudeMin');
       const altMax = setting('altitudeMax');
-      style.lut = buildAltitudeColorLUT(
+      style.lut = buildGradientColorLUT(
         setting('altitudeLinesLowColor'),
         setting('altitudeLinesHighColor')
       );
-      style.altMin = altMin;
-      style.altRange = (altMax - altMin) || 1;
+      style.valueKey = 'alt';
+      style.valMin = altMin;
+      style.valRange = (altMax - altMin) || 1;
     }
 
     state.layers.lineCloud.setTracks(points, lineTrackRanges, style);
@@ -4146,10 +4166,10 @@
     return count;
   }
 
-  // 256-step colour lookup table between two hex colours. Built once per
-  // redraw so per-point altitude colouring is an index lookup rather
-  // than hex parsing + string building per point.
-  function buildAltitudeColorLUT(lowColor, highColor) {
+  // 256-step colour lookup table between two hex colours for the altitude
+  // gradient. Built once per redraw so per-point gradient colouring is an
+  // index lookup rather than hex parsing + string building per point.
+  function buildGradientColorLUT(lowColor, highColor) {
     const c1 = hexToRgb(lowColor);
     const c2 = hexToRgb(highColor);
     const lut = new Array(256);
