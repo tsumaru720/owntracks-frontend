@@ -473,6 +473,8 @@
 
     // Add proximity click handler for easier point interaction
     state.map.on('click', handleProximityClick);
+    // Clear the accuracy circle / bearing arrow when the popup goes away
+    state.map.on('popupclose', clearPointSelectionOverlays);
 
     log('Map initialization complete');
   }
@@ -3304,6 +3306,10 @@
 
     // Update visible count - only points in viewport
     document.getElementById('statVisible').textContent = countPointsInViewport().toLocaleString();
+
+    // Keep the selection overlays in step with any restyle that triggered
+    // this redraw (e.g. a point-colour change)
+    refreshPointSelectionOverlays();
   }
 
   // ============================================================================
@@ -4191,11 +4197,31 @@
   const BATTERY_STATUS_LABELS = { 0: 'Unknown', 1: 'Unplugged', 2: 'Charging', 3: 'Full' };
   const CONN_LABELS = { w: 'WiFi', o: 'Offline', m: 'Mobile' };
   const MONITORING_LABELS = { 1: 'Significant changes', 2: 'Move mode' };
-  const CARDINAL_POINTS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
 
-  function bearingToCardinal(deg) {
-    const idx = Math.round((((deg % 360) + 360) % 360) / 45) % 8;
-    return CARDINAL_POINTS[idx];
+  // Solid navigation arrow rotated to a compass bearing, shared by the
+  // popup Course row and the selected-point map marker. navigation2 faces
+  // north by default and CSS rotation is clockwise, so the course value
+  // maps to degrees directly (no radians). The wrapping span is what
+  // rotates: an HTML element turns about its centre, an SVG element
+  // would turn about the viewBox origin.
+  function courseArrowSvg(cog, size, color) {
+    return `<span style="display:inline-block; line-height:0; transform:rotate(${cog}deg);">` +
+      `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="${color}" aria-hidden="true">` +
+      `<polygon points="12 2 19 21 12 17 5 21 12 2"/></svg></span>`;
+  }
+
+  // Screen-space geometry for the selected-point course arrow: the icon
+  // centre sits (size/2 + gap) px from the point along the bearing, with
+  // the gap between the point and the icon's near edge
+  function courseArrowGeometry(cog) {
+    const size = 32;
+    const gap = 10;
+    const rad = cog * Math.PI / 180;
+    return {
+      size,
+      dx: Math.sin(rad) * (size / 2 + gap),
+      dy: -Math.cos(rad) * (size / 2 + gap)
+    };
   }
 
   function escapeHtml(value) {
@@ -4252,7 +4278,7 @@
         motion ? row('Activity Type', escapeHtml(motion)) : '',
         point.vel !== undefined && point.vel !== null ? row('Velocity', `${(point.vel * 0.621371).toFixed(1)} mph (${point.vel} km/h)`) : '',
         point.cog !== undefined && point.cog !== null
-          ? row('Course', `${bearingToCardinal(point.cog)} (${point.cog}°)`)
+          ? row('Course', `${courseArrowSvg(point.cog, 12, 'currentColor')} ${point.cog}°`)
           : ''
       ],
       [ // environment
@@ -4266,7 +4292,7 @@
         ssid ? row('WiFi', escapeHtml(ssid) + (bssid ? ` (${escapeHtml(bssid)})` : '')) : ''
       ],
       [ // address
-        point.addr ? row('Address', escapeHtml(point.addr)) : ''
+        point.addr ? `<div><strong>Address:</strong></div><div>${escapeHtml(point.addr)}</div>` : ''
       ]
     ].map(group => group.filter(Boolean)).filter(group => group.length > 0);
 
@@ -4359,6 +4385,70 @@
     return projectedPointCache;
   }
 
+  // Overlays for the selected point: a geographically true accuracy
+  // circle (L.circle radii are metres and scale with zoom) and a bearing
+  // arrow. Their lifecycle is owned by the popup - any popupclose
+  // (clicking off, selecting another point, hiding the layer) clears
+  // them, so nothing here needs its own dismissal path.
+  let pointSelectionOverlays = null; // { point, layers: [circle?, arrow?] }
+
+  function clearPointSelectionOverlays() {
+    if (!pointSelectionOverlays) return;
+    for (const layer of pointSelectionOverlays.layers) {
+      state.map.removeLayer(layer);
+    }
+    pointSelectionOverlays = null;
+  }
+
+  function showPointSelectionOverlays(point) {
+    clearPointSelectionOverlays();
+    const color = setting('pointColor');
+    const layers = [];
+
+    if (point.acc !== undefined && point.acc !== null && point.acc > 0) {
+      layers.push(L.circle([point.lat, point.lon], {
+        radius: point.acc,
+        // Map default is preferCanvas; an explicit SVG renderer keeps the
+        // one selected-point circle crisp and out of the batched canvases
+        renderer: L.svg({ padding: 0.5 }),
+        color,
+        weight: 1.5,
+        opacity: 0.9,
+        fillColor: color,
+        fillOpacity: 0.08,
+        interactive: false
+      }).addTo(state.map));
+    }
+
+    if (point.cog !== undefined && point.cog !== null) {
+      // Larger than the popup's arrow - this one has to read against a
+      // map. The icon box stays axis-aligned; only the arrow inside it
+      // rotates (CSS degrees), but the bearing offset needs radians.
+      const { size, dx, dy } = courseArrowGeometry(point.cog);
+      layers.push(L.marker([point.lat, point.lon], {
+        interactive: false,
+        keyboard: false,
+        icon: L.divIcon({
+          className: 'course-arrow-marker',
+          iconSize: [size, size],
+          iconAnchor: [size / 2 - dx, size / 2 - dy],
+          html: courseArrowSvg(point.cog, size, color)
+        })
+      }).addTo(state.map));
+    }
+
+    pointSelectionOverlays = { point, layers };
+  }
+
+  // Setting changes (point colour) redraw the canvas layers through
+  // redrawMap; the selection overlays carry their own copies of that
+  // style, so rebuild them from the remembered point to stay in sync
+  function refreshPointSelectionOverlays() {
+    if (pointSelectionOverlays) {
+      showPointSelectionOverlays(pointSelectionOverlays.point);
+    }
+  }
+
   // Proximity click handler - makes it easier to click on small points.
   // Only fires for visible points: with the point layer hidden there's
   // nothing on the map to aim at, so clicks must fall through.
@@ -4386,11 +4476,22 @@
     }
 
     if (nearestPoint) {
+      // Popups open above their anchor; when the bearing puts the
+      // course arrow above the point, lift the popup clear of it (plus
+      // a small margin) so the arrow stays visible
+      const popupOptions = {};
+      if (nearestPoint.cog !== undefined && nearestPoint.cog !== null) {
+        const { size, dy } = courseArrowGeometry(nearestPoint.cog);
+        popupOptions.offset = [0, -(Math.max(0, size / 2 - dy) + 6)];
+      }
       // Open popup at the point's location
-      const popup = L.popup()
+      const popup = L.popup(popupOptions)
         .setLatLng([nearestPoint.lat, nearestPoint.lon])
         .setContent(createPopupContent(nearestPoint))
         .openOn(state.map);
+      // After openOn: it fires popupclose for the previous popup, and
+      // that must not wipe the new selection's overlays
+      showPointSelectionOverlays(nearestPoint);
     }
   }
 
