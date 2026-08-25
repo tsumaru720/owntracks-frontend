@@ -4191,6 +4191,12 @@
   const BATTERY_STATUS_LABELS = { 0: 'Unknown', 1: 'Unplugged', 2: 'Charging', 3: 'Full' };
   const CONN_LABELS = { w: 'WiFi', o: 'Offline', m: 'Mobile' };
   const MONITORING_LABELS = { 1: 'Significant changes', 2: 'Move mode' };
+  const CARDINAL_POINTS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+
+  function bearingToCardinal(deg) {
+    const idx = Math.round((((deg % 360) + 360) % 360) / 45) % 8;
+    return CARDINAL_POINTS[idx];
+  }
 
   function escapeHtml(value) {
     return String(value)
@@ -4221,77 +4227,52 @@
     const trigger = point.t ? (TRIGGER_LABELS[point.t] || point.t) : null;
     const battStatus = point.bs != null ? (BATTERY_STATUS_LABELS[point.bs] || point.bs) : null;
     const conn = point.conn ? (CONN_LABELS[point.conn] || point.conn) : null;
-    const monitoring = point.m != null ? (MONITORING_LABELS[point.m] || point.m) : null;
+    const trackingMode = point.m != null ? (MONITORING_LABELS[point.m] || point.m) : null;
+
+    const row = (label, value) => `<div><strong>${label}:</strong> ${value}</div>`;
+
+    // Groups keep related rows together; empty groups drop out and the
+    // survivors are joined with a small vertical gap.
+    const groups = [
+      [ // tracker context
+        point.tid ? row('Tracker ID', escapeHtml(point.tid)) : '',
+        trackingMode ? row('Tracking Mode', escapeHtml(trackingMode)) : '',
+        trigger ? row('Trigger', escapeHtml(trigger)) : '',
+        point.rad !== undefined && point.rad !== null ? row('Region radius', `${point.rad} m`) : ''
+      ],
+      [ // position
+        row('Latitude', point.lat.toFixed(6)),
+        row('Longitude', point.lon.toFixed(6)),
+        point.acc !== undefined && point.acc !== null ? row('Accuracy', `${point.acc} m`) : '',
+        point.alt !== undefined && point.alt !== null
+          ? row('Altitude', `${point.alt} m` + (point.vac !== undefined && point.vac !== null ? ` (±${point.vac} m)` : ''))
+          : (point.vac !== undefined && point.vac !== null ? row('Vert. accuracy', `${point.vac} m`) : '')
+      ],
+      [ // movement
+        motion ? row('Activity Type', escapeHtml(motion)) : '',
+        point.vel !== undefined && point.vel !== null ? row('Velocity', `${(point.vel * 0.621371).toFixed(1)} mph (${point.vel} km/h)`) : '',
+        point.cog !== undefined && point.cog !== null
+          ? row('Course', `${bearingToCardinal(point.cog)} (${point.cog}°)`)
+          : ''
+      ],
+      [ // environment
+        point.p !== undefined && point.p !== null ? row('Pressure', `${point.p} kPa`) : ''
+      ],
+      [ // device
+        point.batt !== undefined && point.batt !== null
+          ? row('Battery', `${point.batt}%` + (battStatus ? ` (${battStatus})` : ''))
+          : (battStatus ? row('Battery status', battStatus) : ''),
+        conn ? row('Connection', escapeHtml(conn)) : '',
+        ssid ? row('WiFi', escapeHtml(ssid) + (bssid ? ` (${escapeHtml(bssid)})` : '')) : ''
+      ],
+      [ // address
+        point.addr ? row('Address', escapeHtml(point.addr)) : ''
+      ]
+    ].map(group => group.filter(Boolean)).filter(group => group.length > 0);
 
     let content = `<div style="min-width: 200px;">`;
     content += `<div style="margin-bottom: 8px;">${dateStr}</div>`;
-
-    if (point.tid) {
-      content += `<div><strong>Tracker:</strong> ${escapeHtml(point.tid)}</div>`;
-    }
-
-    content += `<div><strong>Lat:</strong> ${point.lat.toFixed(6)}</div>`;
-    content += `<div><strong>Lon:</strong> ${point.lon.toFixed(6)}</div>`;
-
-    if (trigger) {
-      content += `<div><strong>Trigger:</strong> ${escapeHtml(trigger)}</div>`;
-    }
-
-    if (point.alt !== undefined && point.alt !== null) {
-      const vacSuffix = point.vac !== undefined && point.vac !== null ? ` (±${point.vac} m)` : '';
-      content += `<div><strong>Altitude:</strong> ${point.alt} m${vacSuffix}</div>`;
-    } else if (point.vac !== undefined && point.vac !== null) {
-      content += `<div><strong>Vert. accuracy:</strong> ${point.vac} m</div>`;
-    }
-
-    if (point.acc !== undefined && point.acc !== null) {
-      content += `<div><strong>Accuracy:</strong> ${point.acc} m</div>`;
-    }
-
-    if (point.vel !== undefined && point.vel !== null) {
-      content += `<div><strong>Velocity:</strong> ${point.vel} km/h</div>`;
-    }
-
-    if (point.cog !== undefined && point.cog !== null) {
-      content += `<div><strong>Course:</strong> ${point.cog}°</div>`;
-    }
-
-    if (motion) {
-      content += `<div><strong>Motion:</strong> ${escapeHtml(motion)}</div>`;
-    }
-
-    if (monitoring) {
-      content += `<div><strong>Monitoring:</strong> ${escapeHtml(monitoring)}</div>`;
-    }
-
-    if (point.batt !== undefined && point.batt !== null) {
-      const statusSuffix = battStatus ? ` (${battStatus})` : '';
-      content += `<div><strong>Battery:</strong> ${point.batt}%${statusSuffix}</div>`;
-    } else if (battStatus) {
-      content += `<div><strong>Battery status:</strong> ${battStatus}</div>`;
-    }
-
-    if (conn) {
-      content += `<div><strong>Connection:</strong> ${escapeHtml(conn)}</div>`;
-    }
-
-    if (ssid) {
-      const bssidSuffix = bssid ? ` (${escapeHtml(bssid)})` : '';
-      content += `<div><strong>WiFi:</strong> ${escapeHtml(ssid)}${bssidSuffix}</div>`;
-    }
-
-    if (point.p !== undefined && point.p !== null) {
-      content += `<div><strong>Pressure:</strong> ${point.p} kPa</div>`;
-    }
-
-    if (point.rad !== undefined && point.rad !== null) {
-      content += `<div><strong>Region radius:</strong> ${point.rad} m</div>`;
-    }
-
-    if (point.addr) {
-      content += `<div><strong>Address:</strong> ${escapeHtml(point.addr)}</div>`;
-    }
-
+    content += groups.map(group => group.join('')).join('<div style="height: 8px;"></div>');
     content += `</div>`;
 
     return content;
