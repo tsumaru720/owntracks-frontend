@@ -2366,6 +2366,11 @@
       }
       state.data.raw = allData;
 
+      // The popup and its selection overlays describe a point from the
+      // dataset that was just replaced; closePopup fires popupclose,
+      // which clears them
+      state.map.closePopup();
+
       // Store source breakdown for indicator
       state.data.sourceBreakdown = {
         cached: cachedPointCount,
