@@ -2208,14 +2208,22 @@
     return result.data || [];
   }
 
-  // Cache an API response per day. The current day is never cached: it's
-  // incomplete by nature, and a partial-day key would stop the gap fill
-  // from ever completing it - it rides along as a trailing uncached day of
-  // every load and gets cached complete from tomorrow onwards. Empty days
-  // are cached too: the day key's existence marks the range complete.
+  // Cache an API response per day. The current day and any future day are
+  // never cached: today is incomplete by nature, and a partial-day key
+  // would stop the gap fill from ever completing it - it rides along as a
+  // trailing uncached day of every load and gets cached complete from
+  // tomorrow onwards. Future days (a range whose to-date extends past
+  // now) would otherwise be written as empty keys that silently suppress
+  // fetching once those days arrive. Empty past days are cached too: the
+  // day key's existence marks the range complete.
   async function cacheRangeDays(user, device, data, fromDate, toDate) {
     const dailyData = splitDataByDays(data, fromDate, toDate);
-    delete dailyData[formatDateForInput(new Date())];
+    // Day keys are zero-padded local 'YYYY-MM-DD' strings, so lexical
+    // order is chronological: key >= today means today or later
+    const todayKey = formatDateForInput(new Date());
+    for (const day of Object.keys(dailyData)) {
+      if (day >= todayKey) delete dailyData[day];
+    }
     await cacheDailyData(user, device, dailyData);
   }
 
