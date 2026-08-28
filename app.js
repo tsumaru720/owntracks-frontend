@@ -4502,7 +4502,9 @@
       const dy = clickPoint.y - projected[i * 2 + 1];
       const distanceSq = dx * dx + dy * dy;
 
-      if (distanceSq < minDistanceSq) {
+      // <= so the chronologically latest point wins ties (points that
+      // project to the same pixel)
+      if (distanceSq <= minDistanceSq) {
         minDistanceSq = distanceSq;
         nearestPoint = state.data.filtered[i];
       }
