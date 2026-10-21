@@ -68,6 +68,7 @@ The OwnTracks recorder (the API) can take a long time to give a response if quer
 - **Smart Caching**: Display changes use cached data; no repeated API calls
 - **Multiple Visualizations**: Points, route lines, altitude gradients, heatmap
 - **Satellite View**: Toggle between street tiles and satellite imagery (with an optional road/place-name overlay) from the map dock
+- **Activity Log**: Slide-out panel listing your points newest-first, with motion icons, addresses, and click-to-navigate map integration
 - **Data Persistence**: Optional IndexedDB caching across sessions
 - **Dark/Light Mode**: Theme toggle with persistence
 - **Configurable Filters**: GPS accuracy filter, date ranges, quick presets
@@ -80,6 +81,7 @@ The OwnTracks recorder (the API) can take a long time to give a response if quer
 4. Toggle points/lines/heatmap, switch street/satellite tiles, and recenter from the floating quick actions dock on the map
 5. Customize styling in the sidebar (all changes use cached data)
 6. Toggle dark/light mode at bottom of sidebar
+7. Browse your location history in the activity panel (button at the middle of the right edge, or press `A`)
 
 ### Keyboard Shortcuts
 
@@ -91,6 +93,7 @@ The OwnTracks recorder (the API) can take a long time to give a response if quer
 | `L` | Toggle lines |
 | `M` | Toggle satellite view |
 | `F` | Fit map to data |
+| `A` | Toggle activity panel |
 
 ## Configuration
 
@@ -221,6 +224,11 @@ The point, line, and heatmap settings each live behind their own collapsible dro
 - Toggle points, route lines, and heatmap visibility
 - Switch between street tiles and satellite imagery (hybrid view: imagery plus a road/place-name overlay; set `map.satelliteLabelServer` to an empty string for plain imagery)
 - Toggle states are saved in browser settings; defaults can be set via `display.points.show`, `display.lines.show`, `display.heatmap.enabled`, and `map.satelliteEnabled`
+
+### Activity Log
+- Slide-out panel on the right edge (button at the middle of the edge, or press `A`); lists points newest-first, paginated (25/50/100/250 per page, 50 by default)
+- Click an entry to pan to that point at your current zoom; clicking a point on the map jumps the list to its page with the entry highlighted
+- "In view" narrows the list to points currently visible on the map as you pan and zoom (the map itself always shows everything)
 
 ### Points
 - Customize color/size/opacity (visibility via the quick actions dock)
