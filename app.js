@@ -31,6 +31,7 @@
     },
     settings: {},
     sidebarOpen: false,
+    activityOpen: false,
     loadingStartTime: null,
     loadingTimerInterval: null,
     suppressMapSave: false
@@ -203,6 +204,9 @@
 
     // Restore sidebar state
     restoreSidebarState();
+
+    // Restore activity panel state
+    restoreActivityPanelState();
 
     // Apply theme
     applyTheme();
@@ -385,6 +389,11 @@
     autoFitToBounds: true,
     consoleLoggingEnabled: false,
     sidebarOpen: true,
+    activityPanelOpen: false,
+    activityPageSize: 50,
+    activityPage: 1,
+    activitySelectedPoint: null,
+    activityViewportFilter: false,
     datePreset: '30days',
     fromDate: '',
     toDate: '',
@@ -475,6 +484,8 @@
     state.map.on('click', handleProximityClick);
     // Clear the accuracy circle / bearing arrow when the popup goes away
     state.map.on('popupclose', clearPointSelectionOverlays);
+    // ... and the activity panel's selected-row highlight with it
+    state.map.on('popupclose', clearActivitySelection);
 
     log('Map initialization complete');
   }
@@ -641,6 +652,40 @@
 
     // Sidebar toggle
     document.getElementById('sidebarToggle').addEventListener('click', toggleSidebar);
+
+    // Activity panel: toggle tab, row clicks (delegated - the list
+    // re-renders often), pagination and page size
+    document.getElementById('activityToggle').addEventListener('click', toggleActivityPanel);
+    document.getElementById('activityList').addEventListener('click', (e) => {
+      const row = e.target.closest('.activity-item');
+      if (!row) return;
+      const point = activitySortedPoints[parseInt(row.dataset.pointIndex, 10)];
+      if (!point) return;
+      selectPoint(point);
+      // Pan to the point keeping the current zoom (read at click time);
+      // wrapped so it isn't persisted as the user's saved position
+      applyProgrammaticMapView(() => {
+        state.map.setView([point.lat, point.lon], state.map.getZoom());
+      });
+    });
+    document.getElementById('activityPrevBtn').addEventListener('click', () => setActivityPage(activityPage - 1));
+    document.getElementById('activityNextBtn').addEventListener('click', () => setActivityPage(activityPage + 1));
+    // "In view" narrows the dataset to the current viewport; like a
+    // page-size change the dataset fundamentally changed, so page 1
+    document.getElementById('activityViewportFilter').addEventListener('change', (e) => {
+      setSetting('activityViewportFilter', e.target.checked);
+      activitySortedPoints = sortedFilteredPoints();
+      setActivityPage(1);
+    });
+    document.getElementById('activityPageSize').addEventListener('change', (e) => {
+      const size = parseInt(e.target.value, 10);
+      if (ACTIVITY_PAGE_SIZES.includes(size)) {
+        setSetting('activityPageSize', size);
+        setActivityPage(1);
+      } else {
+        e.target.value = String(getActivityPageSize());
+      }
+    });
 
     // Data source controls
     document.getElementById('userSelect').addEventListener('change', handleUserChange);
@@ -1253,6 +1298,9 @@
     // disabled); keep the viewport point count current
     state.map.on('moveend zoomend', saveMapPosition);
     state.map.on('moveend zoomend', updateViewportStats);
+    // Re-filter the activity list once pan/zoom gestures settle (never
+    // mid-gesture); a no-op while the "In view" filter is off
+    state.map.on('moveend zoomend', refreshActivityViewport);
 
     // Apply saved settings to UI
     applySettingsToUI();
@@ -1286,6 +1334,13 @@
      'storageEnabled', 'autoFitToBounds', 'consoleLoggingEnabled'].forEach(id => {
       document.getElementById(id).checked = setting(id);
     });
+
+    // Activity panel page size (fixed option set; stray saved values
+    // fall back to the default in the select)
+    document.getElementById('activityPageSize').value = String(getActivityPageSize());
+
+    // Activity panel viewport filter
+    document.getElementById('activityViewportFilter').checked = setting('activityViewportFilter');
 
     // Accuracy + altitude filters (steps are rebuilt on data load)
     accuracyCtl.rebuild(buildAccuracySteps(0), setting('accuracyMaxMeters'));
@@ -1420,6 +1475,10 @@
       case 'f':
         e.preventDefault();
         if (state.data.filtered.length > 0) fitMapToBounds();
+        break;
+      case 'a':
+        e.preventDefault();
+        toggleActivityPanel();
         break;
     }
   }
@@ -2396,6 +2455,10 @@
 
       document.getElementById('qaRecenter').disabled = false;
 
+      // The activity panel's "loaded" empty state applies from here on
+      // (an empty list now means the filters exclude everything)
+      activityDataLoaded = true;
+
       // Single pass for time range, accuracy range and altitude range.
       // No Math.min(...spread): spreading a large array
       // exceeds the argument limit (issue #3)
@@ -2439,6 +2502,12 @@
           setSetting('altitudeMin', Math.floor(altRange.min));
           setSetting('altitudeMax', Math.ceil(altRange.max));
         }
+        // A fresh load restarts the activity list from page 1 with no
+        // remembered selection (the boot-time cache restore keeps both)
+        activitySelectedKey = null;
+        saveSetting('activitySelectedPoint', null, null);
+        activityPage = 1;
+        saveSetting('activityPage', 1, 1);
       }
       accuracyCtl.rebuild(buildAccuracySteps(state.data.accuracyRange.max),
         cacheOnly ? setting('accuracyMaxMeters') : 0);
@@ -2494,6 +2563,8 @@
     clearRenderedLayers();
     invalidateProjectedPointCache();
     updateStats();
+    activityDataLoaded = false;
+    refreshActivityData();
     document.getElementById('qaRecenter').disabled = true;
   }
 
@@ -3253,6 +3324,7 @@
 
     invalidateProjectedPointCache();
     updateStats();
+    refreshActivityData();
   }
 
   async function handleUserChange() {
@@ -4266,8 +4338,9 @@
       .replace(/'/g, '&#39;');
   }
 
-  function createPopupContent(point) {
-    const dateStr = new Date(point.tst * 1000).toLocaleString('en-GB', {
+  // Timestamp format shared by the point popup and the activity list
+  function formatPointTimestamp(tst) {
+    return new Date(tst * 1000).toLocaleString('en-GB', {
       day: 'numeric',
       month: 'long',
       year: 'numeric',
@@ -4276,6 +4349,10 @@
       second: '2-digit',
       hour12: false
     });
+  }
+
+  function createPopupContent(point) {
+    const dateStr = formatPointTimestamp(point.tst);
 
     // iOS sends SSID/BSSID uppercase; Android and older payloads lowercase.
     const ssid = point.ssid || point.SSID;
@@ -4365,6 +4442,14 @@
       ? sidebar.offsetWidth + dockClearance
       : dockClearance;
 
+    // Right padding keeps the fitted bounds clear of the activity panel
+    // while it is open (offsetWidth for the same transition-stable
+    // reason as the sidebar). Closed - the base padding, unchanged.
+    const activityPanel = document.getElementById('activityPanel');
+    const rightPadding = state.activityOpen && activityPanel
+      ? activityPanel.offsetWidth + basePadding
+      : basePadding;
+
     // Record the fitted view once the move settles (timeout fallback:
     // Leaflet may not fire moveend if the fit changes nothing)
     let fitSaved = false;
@@ -4380,7 +4465,7 @@
     applyProgrammaticMapView(() => {
       state.map.fitBounds(bounds, {
         paddingTopLeft: [leftPadding, basePadding],
-        paddingBottomRight: [basePadding, basePadding],
+        paddingBottomRight: [rightPadding, basePadding],
         animate: false
       });
     });
@@ -4482,6 +4567,28 @@
     }
   }
 
+  // Open a point's popup plus its selection overlays; shared by map
+  // proximity clicks and activity-list rows
+  function selectPoint(point, opts) {
+    // Popups open above their anchor; when the bearing puts the
+    // course arrow above the point, lift the popup clear of it (plus
+    // a small margin) so the arrow stays visible
+    const popupOptions = {};
+    if (point.cog !== undefined && point.cog !== null) {
+      const { size, dy } = courseArrowGeometry(point.cog);
+      popupOptions.offset = [0, -(Math.max(0, size / 2 - dy) + 6)];
+    }
+    // Open popup at the point's location
+    L.popup(popupOptions)
+      .setLatLng([point.lat, point.lon])
+      .setContent(createPopupContent(point))
+      .openOn(state.map);
+    // After openOn: it fires popupclose for the previous popup, and
+    // that must not wipe the new selection's overlays
+    showPointSelectionOverlays(point);
+    setActivitySelection(point, opts);
+  }
+
   // Proximity click handler - makes it easier to click on small points.
   // Only fires for visible points: with the point layer hidden there's
   // nothing on the map to aim at, so clicks must fall through.
@@ -4511,23 +4618,292 @@
     }
 
     if (nearestPoint) {
-      // Popups open above their anchor; when the bearing puts the
-      // course arrow above the point, lift the popup clear of it (plus
-      // a small margin) so the arrow stays visible
-      const popupOptions = {};
-      if (nearestPoint.cog !== undefined && nearestPoint.cog !== null) {
-        const { size, dy } = courseArrowGeometry(nearestPoint.cog);
-        popupOptions.offset = [0, -(Math.max(0, size / 2 - dy) + 6)];
-      }
-      // Open popup at the point's location
-      const popup = L.popup(popupOptions)
-        .setLatLng([nearestPoint.lat, nearestPoint.lon])
-        .setContent(createPopupContent(nearestPoint))
-        .openOn(state.map);
-      // After openOn: it fires popupclose for the previous popup, and
-      // that must not wipe the new selection's overlays
-      showPointSelectionOverlays(nearestPoint);
+      selectPoint(nearestPoint, { fromMap: true });
     }
+  }
+
+  // ============================================================================
+  // Activity Panel
+  // ============================================================================
+
+  // Page sizes offered by the panel header's select
+  const ACTIVITY_PAGE_SIZES = [25, 50, 100, 250];
+
+  // Newest-first view of state.data.filtered (the same points the map
+  // renders), rebuilt once per data/filter change so pagination is a plain
+  // slice - never a re-sort over the 100k+ point set
+  let activitySortedPoints = [];
+  let activityPage = 1;
+  let activitySelectedKey = null;
+  let activityDataLoaded = false;
+  // Set at boot restore: the first data arrival centres the list on the
+  // remembered selection (or drops it), once
+  let activityRestorePending = false;
+
+  function getActivityPageSize() {
+    const size = setting('activityPageSize');
+    return ACTIVITY_PAGE_SIZES.includes(size) ? size : 50;
+  }
+
+  // Points carry no id field; tst|lat|lon identifies one for selection
+  // matching between the popup and activity rows
+  function pointKey(point) {
+    return `${point.tst}|${point.lat}|${point.lon}`;
+  }
+
+  // iOS motion activity name -> icon symbol id
+  const MOTION_ICON_SYMBOLS = {
+    automotive: 'motion-automotive-icon',
+    cycling: 'motion-cycling-icon',
+    running: 'motion-running-icon',
+    walking: 'motion-walking-icon',
+    unknown: 'motion-unknown-icon'
+  };
+
+  // Icon for a point's motionactivities: the first active (non-stationary,
+  // non-unknown) entry wins, else unknown. Stationary-only points and no
+  // data at all -> null (rendered as a plain hyphen)
+  function motionIconSymbolId(point) {
+    if (!Array.isArray(point.motionactivities)) return null;
+    const activities = point.motionactivities.filter(Boolean);
+    if (activities.length === 0) return null;
+    const active = activities.find(a => a !== 'stationary' && a !== 'unknown');
+    if (active !== undefined) return MOTION_ICON_SYMBOLS[active] || MOTION_ICON_SYMBOLS.unknown;
+    return activities.includes('stationary') ? null : MOTION_ICON_SYMBOLS.unknown;
+  }
+
+  // conn code -> icon symbol id (labels come from CONN_LABELS)
+  const CONN_ICON_SYMBOLS = {
+    w: 'conn-wifi-icon',
+    m: 'conn-cellular-icon',
+    o: 'conn-offline-icon'
+  };
+
+  function buildActivityItemHtml(point, index) {
+    const title = point.addr ? point.addr
+      : `${point.lat.toFixed(5)}, ${point.lon.toFixed(5)}`;
+
+    const motionSymbol = motionIconSymbolId(point);
+    const iconHtml = motionSymbol
+      ? `<svg class="activity-motion-icon" aria-hidden="true"><use href="#${motionSymbol}"/></svg>`
+      : `<span class="activity-no-motion" aria-hidden="true">–</span>`;
+
+    const metaParts = [escapeHtml(formatPointTimestamp(point.tst))];
+    if (typeof point.acc === 'number' && point.acc > 0) {
+      metaParts.push(`±${point.acc} m`);
+    }
+    if (typeof point.alt === 'number' && !Number.isNaN(point.alt)) {
+      metaParts.push(`${point.alt} m`);
+    }
+    if (CONN_ICON_SYMBOLS[point.conn]) {
+      const label = CONN_LABELS[point.conn] || point.conn;
+      metaParts.push(`<svg class="activity-meta-icon" role="img" aria-label="${escapeHtml(label)}"><title>${escapeHtml(label)}</title><use href="#${CONN_ICON_SYMBOLS[point.conn]}"/></svg>`);
+    }
+
+    return `<button type="button" class="activity-item" data-point-index="${index}" data-point-key="${escapeHtml(pointKey(point))}" title="${escapeHtml(title)}">` +
+      `<span class="activity-item-icon">${iconHtml}</span>` +
+      `<span class="activity-item-body">` +
+      `<span class="activity-item-title">${escapeHtml(title)}</span>` +
+      `<span class="activity-item-meta">${metaParts.join(' · ')}</span>` +
+      `</span></button>`;
+  }
+
+  // (Re)build only the current page's rows - never the whole dataset
+  function renderActivityList() {
+    const listEl = document.getElementById('activityList');
+    if (!listEl) return;
+
+    const points = activitySortedPoints;
+    const pageSize = getActivityPageSize();
+    const totalPages = Math.max(1, Math.ceil(points.length / pageSize));
+    if (activityPage > totalPages) activityPage = totalPages;
+
+    if (points.length === 0) {
+      let emptyMessage;
+      if (!activityDataLoaded) {
+        emptyMessage = 'Load data to see activity';
+      } else if (setting('activityViewportFilter')) {
+        emptyMessage = 'No points in the current map view';
+      } else {
+        emptyMessage = 'No points match the current filters';
+      }
+      listEl.innerHTML = `<div class="activity-empty">${emptyMessage}</div>`;
+    } else {
+      const start = (activityPage - 1) * pageSize;
+      const end = Math.min(start + pageSize, points.length);
+      let html = '';
+      for (let i = start; i < end; i++) {
+        html += buildActivityItemHtml(points[i], i);
+      }
+      listEl.innerHTML = html;
+    }
+
+    updateActivitySelectionClasses();
+
+    document.getElementById('activityPrevBtn').disabled = activityPage <= 1;
+    document.getElementById('activityNextBtn').disabled = activityPage >= totalPages;
+    document.getElementById('activityPageInfo').textContent =
+      `Page ${activityPage} of ${totalPages} · ${points.length.toLocaleString()} point${points.length === 1 ? '' : 's'}`;
+  }
+
+  function setActivityPage(page) {
+    const pageSize = getActivityPageSize();
+    const totalPages = Math.max(1, Math.ceil(activitySortedPoints.length / pageSize));
+    activityPage = Math.min(Math.max(1, page), totalPages);
+    saveSetting('activityPage', activityPage, 1);
+    renderActivityList();
+  }
+
+  // Selection changes only toggle classes on existing rows - no rebuild
+  function updateActivitySelectionClasses() {
+    const listEl = document.getElementById('activityList');
+    if (!listEl) return;
+
+    let selectedRow = null;
+    listEl.querySelectorAll('.activity-item').forEach(row => {
+      const isSelected = activitySelectedKey !== null && row.dataset.pointKey === activitySelectedKey;
+      row.classList.toggle('selected', isSelected);
+      if (isSelected) selectedRow = row;
+    });
+    if (selectedRow && state.activityOpen) {
+      selectedRow.scrollIntoView({ block: 'nearest' });
+    }
+  }
+
+  function setActivitySelection(point, opts) {
+    activitySelectedKey = pointKey(point);
+    saveSetting('activitySelectedPoint', activitySelectedKey, null);
+
+    // Selecting from the map: take the list to the page showing the
+    // point, with the selected row roughly in the middle of the panel.
+    // Row clicks skip this - the clicked row is already in view.
+    if (opts && opts.fromMap && state.activityOpen) {
+      const idx = activitySortedPoints.findIndex(p => pointKey(p) === activitySelectedKey);
+      if (idx !== -1) {
+        const targetPage = Math.floor(idx / getActivityPageSize()) + 1;
+        if (targetPage !== activityPage) setActivityPage(targetPage);
+      }
+      updateActivitySelectionClasses();
+      const selectedRow = document.querySelector(
+        '.activity-item[data-point-key="' + CSS.escape(activitySelectedKey) + '"]');
+      if (selectedRow) selectedRow.scrollIntoView({ block: 'center' });
+      return;
+    }
+
+    updateActivitySelectionClasses();
+  }
+
+  // popupclose counterpart: a selected row exists exactly while its
+  // point's popup is open
+  function clearActivitySelection() {
+    if (activitySelectedKey === null) return;
+    activitySelectedKey = null;
+    saveSetting('activitySelectedPoint', null, null);
+    updateActivitySelectionClasses();
+  }
+
+  // Boot restore: jump the list to the remembered selection's page (or
+  // drop the remembered selection if its point is gone). No map pan -
+  // the map restore path stays exactly as it is.
+  function resolvePendingActivitySelection() {
+    if (!activityRestorePending) return;
+    activityRestorePending = false;
+    if (activitySelectedKey === null) return;
+
+    const [tst, lat, lon] = activitySelectedKey.split('|').map(Number);
+    const points = activitySortedPoints;
+    let found = -1;
+    for (let i = 0; i < points.length; i++) {
+      if (points[i].tst === tst && points[i].lat === lat && points[i].lon === lon) {
+        found = i;
+        break;
+      }
+    }
+    if (found === -1) {
+      activitySelectedKey = null;
+      saveSetting('activitySelectedPoint', null, null);
+      return;
+    }
+    activityPage = Math.floor(found / getActivityPageSize()) + 1;
+  }
+
+  // The list's source set: state.data.filtered newest-first, narrowed to
+  // the points inside the current viewport when "In view" is on
+  function sortedFilteredPoints() {
+    const points = state.data.filtered.slice().sort((a, b) => b.tst - a.tst);
+    if (!setting('activityViewportFilter') || !state.map) return points;
+    const bounds = state.map.getBounds();
+    return points.filter(p => bounds.contains([p.lat, p.lon]));
+  }
+
+  // Newest-first index over the freshly filtered data; the hook for every
+  // state.data.filtered change (load, refilter, clear)
+  function refreshActivityData() {
+    activitySortedPoints = sortedFilteredPoints();
+    resolvePendingActivitySelection();
+    renderActivityList();
+  }
+
+  // moveend/zoomend hook: the viewport moved, so the "In view" subset is
+  // stale. Recomputes only once the gesture has settled (these events fire
+  // at the end, never mid-drag) and only rebuilds the DOM while the panel
+  // is open - a closed panel re-evaluates when it opens. While the filter
+  // is off there is nothing to do. Programmatic view changes (fitBounds,
+  // restoreMapPosition) end in moveend too, so they ride this same path;
+  // the first restore moveend also corrects the initial build when map
+  // position was restored after the list was built.
+  function refreshActivityViewport() {
+    if (!setting('activityViewportFilter') || !state.activityOpen) return;
+    activitySortedPoints = sortedFilteredPoints();
+    renderActivityList();
+  }
+
+  function toggleActivityPanel() {
+    state.activityOpen = !state.activityOpen;
+    const panel = document.getElementById('activityPanel');
+
+    // Enable transitions for manual toggles
+    panel.classList.add('transitions-enabled');
+    panel.classList.toggle('open', state.activityOpen);
+    document.body.classList.toggle('activity-open', state.activityOpen);
+    document.getElementById('activityToggle').setAttribute('aria-expanded', String(state.activityOpen));
+    saveSetting('activityPanelOpen', state.activityOpen, false);
+
+    // Opening with "In view" on: re-evaluate against the current viewport
+    // before the list's first paint (moves may have happened while closed)
+    if (state.activityOpen && setting('activityViewportFilter')) {
+      activitySortedPoints = sortedFilteredPoints();
+      renderActivityList();
+    }
+
+    // Re-fit (if auto-fit on) once the panel transition has started - the
+    // same post-toggle refit the sidebar does
+    if (setting('autoFitToBounds') && state.data.filtered.length > 0) {
+      setTimeout(() => {
+        fitMapToBounds();
+      }, 50);
+    }
+  }
+
+  function restoreActivityPanelState() {
+    const panel = document.getElementById('activityPanel');
+    const rememberedPage = parseInt(setting('activityPage'), 10);
+    activityPage = Number.isFinite(rememberedPage) && rememberedPage >= 1 ? rememberedPage : 1;
+    const rememberedSelection = setting('activitySelectedPoint');
+    activitySelectedKey = typeof rememberedSelection === 'string' ? rememberedSelection : null;
+    activityRestorePending = true;
+
+    if (setting('activityPanelOpen')) {
+      state.activityOpen = true;
+      panel.classList.add('open');
+      document.body.classList.add('activity-open');
+      document.getElementById('activityToggle').setAttribute('aria-expanded', 'true');
+    }
+
+    // Disable initial animations until the page state is fully restored.
+    setTimeout(() => {
+      panel.classList.add('transitions-enabled');
+    }, 50);
   }
 
   // ============================================================================

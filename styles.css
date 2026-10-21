@@ -1,5 +1,6 @@
 :root {
   --sidebar-width: 320px;
+  --activity-panel-width: 340px;
   --header-height: 50px;
   --bg-light: #f8f9fa;
   --bg-dark: #1a1a1a;
@@ -595,6 +596,292 @@ body:not(.ui-ready) .sub-section-content {
 .sub-section-header:not(.collapsed) + .sub-section-content {
   margin-top: 10px;
   margin-bottom: 0;
+}
+
+/* Activity panel - right-hand slide-in list of location points; mirrors
+   the sidebar's slide mechanics (transform + .open +
+   .transitions-enabled) */
+.activity-panel {
+  position: fixed;
+  top: var(--header-height);
+  right: 0;
+  width: var(--activity-panel-width);
+  height: calc(100vh - var(--header-height));
+  transform: translateX(100%);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+}
+
+.activity-panel.transitions-enabled {
+  transition: transform 0.3s ease;
+}
+
+.activity-panel.open {
+  transform: translateX(0);
+}
+
+.light-mode .activity-panel {
+  background-color: #fff;
+  border-left: 1px solid var(--border-light);
+}
+
+.dark-mode .activity-panel {
+  background-color: #2a2a2a;
+  border-left: 1px solid var(--border-dark);
+}
+
+.activity-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 15px;
+  border-bottom: 1px solid transparent;
+}
+
+.light-mode .activity-header {
+  border-bottom-color: var(--border-light);
+}
+
+.dark-mode .activity-header {
+  border-bottom-color: var(--border-dark);
+}
+
+.activity-title {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  opacity: 0.8;
+}
+
+/* Right side of the panel header: "In view" filter + page-size select */
+.activity-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.activity-viewport-filter {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.activity-viewport-filter input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  cursor: pointer;
+}
+
+.activity-viewport-filter:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.activity-page-size {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.activity-page-size select {
+  padding: 4px 6px;
+  font-size: 12px;
+  border: 1px solid;
+  border-radius: 4px;
+  background-color: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.light-mode .activity-page-size select {
+  background-color: #fff;
+  border-color: var(--border-light);
+  color: var(--text-light);
+}
+
+.dark-mode .activity-page-size select {
+  background-color: #1a1a1a;
+  border-color: var(--border-dark);
+  color: var(--text-dark);
+}
+
+.activity-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.activity-empty {
+  padding: 24px 12px;
+  text-align: center;
+  font-size: 13px;
+  opacity: 0.6;
+}
+
+.activity-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 8px;
+  border: none;
+  border-radius: 4px;
+  background-color: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.activity-item:hover {
+  background-color: rgba(51, 136, 255, 0.1);
+}
+
+.activity-item.selected {
+  background-color: rgba(51, 136, 255, 0.18);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.activity-item-icon {
+  flex: 0 0 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-top: 1px;
+  opacity: 0.75;
+}
+
+.activity-motion-icon {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+/* No motionactivities data at all - a subtle plain hyphen */
+.activity-no-motion {
+  font-size: 14px;
+  opacity: 0.5;
+}
+
+.activity-item-body {
+  flex: 1;
+  min-width: 0; /* let the title ellipsis inside the flex row */
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.activity-item-title {
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.activity-item-meta {
+  font-size: 11px;
+  opacity: 0.65;
+  line-height: 1.5;
+}
+
+.activity-meta-icon {
+  width: 12px;
+  height: 12px;
+  vertical-align: -2px;
+}
+
+.activity-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid transparent;
+}
+
+.light-mode .activity-footer {
+  border-top-color: var(--border-light);
+}
+
+.dark-mode .activity-footer {
+  border-top-color: var(--border-dark);
+}
+
+.activity-page-info {
+  flex: 1;
+  text-align: center;
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+/* Vertical tab pinned to the middle of the right edge; rides the panel's
+   left edge when it opens */
+.activity-toggle {
+  position: fixed;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 34px;
+  padding: 14px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid;
+  border-right: none;
+  border-radius: 8px 0 0 8px;
+  cursor: pointer;
+  color: var(--accent);
+  box-shadow: -2px 2px 10px rgba(0, 0, 0, 0.25);
+  z-index: 1100; /* above the panel (1000) so the feature stays visible */
+}
+
+.light-mode .activity-toggle {
+  background-color: rgba(255, 255, 255, 0.9);
+  border-color: var(--border-light);
+}
+
+.dark-mode .activity-toggle {
+  background-color: rgba(42, 42, 42, 0.9);
+  border-color: var(--border-dark);
+}
+
+.activity-open .activity-toggle {
+  right: var(--activity-panel-width);
+}
+
+.activity-toggle svg {
+  width: 20px;
+  height: 20px;
+  pointer-events: none;
+}
+
+.activity-toggle:hover {
+  color: var(--accent-hover);
+}
+
+/* Leaflet's right-side controls (zoom topright, attribution bottomright)
+   slide left with the panel so they stay usable */
+.activity-open .leaflet-right {
+  margin-right: var(--activity-panel-width);
+}
+
+/* The toggle's ride and the Leaflet control shift animate only once the
+   first paint has happened - nothing slides on page-load restore */
+body.ui-ready .activity-toggle {
+  transition: right 0.3s ease, background-color 0.2s, color 0.2s;
+}
+
+body.ui-ready .leaflet-right {
+  transition: margin-right 0.3s ease;
 }
 
 /* Form Elements */
@@ -1502,12 +1789,24 @@ body:not(.ui-ready) .sub-section-content {
 @media (max-width: 600px) {
   :root {
     --sidebar-width: 100%;
+    --activity-panel-width: 100%;
   }
 
   /* Sidebar covers the screen when open here - keep the dock parked at
      the edge rather than sliding off-screen */
   .sidebar.open ~ .quick-actions {
     left: 10px;
+  }
+
+  /* The panel covers the whole screen here - keep the tab at the right
+     edge (above the panel, so it stays closable) and the map controls
+     where they were */
+  .activity-open .activity-toggle {
+    right: 0;
+  }
+
+  .activity-open .leaflet-right {
+    margin-right: 0;
   }
 }
 
@@ -1532,4 +1831,23 @@ body:not(.ui-ready) .sub-section-content {
 
 .sidebar::-webkit-scrollbar-thumb:hover {
   background: var(--accent);
+}
+
+/* Activity panel list scrollbar (mirrors the sidebar's) */
+.activity-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.activity-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.light-mode .activity-list::-webkit-scrollbar-thumb {
+  background: var(--border-light);
+  border-radius: 4px;
+}
+
+.dark-mode .activity-list::-webkit-scrollbar-thumb {
+  background: var(--border-dark);
+  border-radius: 4px;
 }
